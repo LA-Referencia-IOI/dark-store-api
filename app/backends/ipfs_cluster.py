@@ -48,7 +48,7 @@ class IPFSClusterBackend(StorageBackend):
         self.cluster_api_url = cluster_api_url.rstrip("/")
         self.timeout = timeout
 
-    async def store(self, content: bytes, content_type: str) -> ContentInfo:
+    async def store(self, content: bytes) -> ContentInfo:
         """
         Store content in IPFS and return CID.
 
@@ -61,7 +61,7 @@ class IPFSClusterBackend(StorageBackend):
                 response = await client.post(
                     f"{self.ipfs_api_url}/api/v0/add",
                     params={"cid-version": 1, "pin": True},
-                    files={"file": ("content", content, content_type)},
+                    files={"file": ("content", content, "application/octet-stream")},
                 )
                 response.raise_for_status()
 
@@ -69,9 +69,18 @@ class IPFSClusterBackend(StorageBackend):
                 cid = result["Hash"]
                 size = int(result.get("Size", len(content)))
 
-                logger.info(f"Stored content in IPFS: CID={cid}, size={size}")
+                # Register the CID in IPFS Cluster so pin status and replication
+                # reflect the default distributed backend, not just the local node.
+                cluster_response = await client.post(f"{self.cluster_api_url}/pins/{cid}")
+                if cluster_response.status_code not in {200, 202, 409}:
+                    raise StorageError(
+                        "Cluster pin registration failed: "
+                        f"HTTP {cluster_response.status_code} - {cluster_response.text}"
+                    )
 
-                return ContentInfo(cid=cid, size=size, content_type=content_type)
+                logger.info(f"Stored raw content in IPFS: CID={cid}, size={size}")
+
+                return ContentInfo(cid=cid, size=size)
 
         except httpx.HTTPStatusError as e:
             logger.error(f"IPFS API error: {e.response.status_code} - {e.response.text}")
@@ -83,7 +92,7 @@ class IPFSClusterBackend(StorageBackend):
             logger.error(f"Unexpected error storing content: {e}")
             raise StorageError(f"Storage failed: {e}")
 
-    async def retrieve(self, cid: str) -> tuple[bytes, str]:
+    async def retrieve(self, cid: str) -> bytes:
         """
         Retrieve content from IPFS by CID.
 
@@ -105,11 +114,8 @@ class IPFSClusterBackend(StorageBackend):
                 response.raise_for_status()
 
                 content = response.content
-                # IPFS doesn't preserve content-type, return as octet-stream
-                content_type = "application/octet-stream"
-
                 logger.debug(f"Retrieved content for CID: {cid}, size={len(content)}")
-                return content, content_type
+                return content
 
         except ContentNotFoundError:
             raise

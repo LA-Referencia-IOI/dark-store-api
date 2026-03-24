@@ -5,7 +5,6 @@ Uses MD5 hash as CID (not a real IPFS CID, but useful for local dev).
 """
 
 import hashlib
-import json
 import logging
 from pathlib import Path
 
@@ -25,7 +24,7 @@ class FileSystemBackend(StorageBackend):
     """
     Filesystem implementation of storage backend.
 
-    Files are stored as {md5_hash}.dat with a .meta sidecar for content-type.
+    Files are stored as raw blobs named by their MD5 pseudo-CID.
     Uses MD5 hash as a pseudo-CID for content-addressable storage.
     """
 
@@ -61,58 +60,37 @@ class FileSystemBackend(StorageBackend):
     def _get_content_path(self, cid: str) -> Path:
         """Get content file path for a given CID."""
         safe_cid = self._sanitize_cid(cid)
-        return self.storage_path / f"{safe_cid}.dat"
+        return self.storage_path / safe_cid
 
-    def _get_meta_path(self, cid: str) -> Path:
-        """Get metadata sidecar file path."""
-        safe_cid = self._sanitize_cid(cid)
-        return self.storage_path / f"{safe_cid}.meta"
-
-    async def store(self, content: bytes, content_type: str) -> ContentInfo:
+    async def store(self, content: bytes) -> ContentInfo:
         """Store content and return ContentInfo with MD5-based CID."""
         try:
             cid = self._calculate_cid(content)
             content_path = self._get_content_path(cid)
-            meta_path = self._get_meta_path(cid)
 
             # Write content atomically using temp file + rename
             temp_content = content_path.with_suffix(".tmp")
             temp_content.write_bytes(content)
             temp_content.replace(content_path)
 
-            # Write metadata
-            meta_data = {"content_type": content_type, "size": len(content)}
-            temp_meta = meta_path.with_suffix(".tmp")
-            temp_meta.write_text(json.dumps(meta_data), encoding="utf-8")
-            temp_meta.replace(meta_path)
+            logger.info(f"Stored raw content with CID: {cid}")
 
-            logger.info(f"Stored content with CID: {cid} (type: {content_type})")
-
-            return ContentInfo(cid=cid, size=len(content), content_type=content_type)
+            return ContentInfo(cid=cid, size=len(content))
 
         except Exception as e:
             logger.error(f"Failed to store content: {e}")
             raise StorageError(f"Storage failed: {e}")
 
-    async def retrieve(self, cid: str) -> tuple[bytes, str]:
+    async def retrieve(self, cid: str) -> bytes:
         """Retrieve content by CID."""
         try:
             content_path = self._get_content_path(cid)
-            meta_path = self._get_meta_path(cid)
 
             if not content_path.exists():
                 raise ContentNotFoundError(f"Content not found for CID: {cid}")
 
-            content = content_path.read_bytes()
-
-            # Get content type from metadata
-            content_type = "application/octet-stream"
-            if meta_path.exists():
-                meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
-                content_type = meta_data.get("content_type", content_type)
-
             logger.debug(f"Retrieved content for CID: {cid}")
-            return content, content_type
+            return content_path.read_bytes()
 
         except ContentNotFoundError:
             raise

@@ -5,16 +5,29 @@ Uses Pydantic Settings for environment variable management.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _resolve_env_file() -> str:
+    """Prefer local integration settings when present."""
+    project_root = Path(__file__).resolve().parents[1]
+    integration_env = project_root / ".env.integration"
+    default_env = project_root / ".env"
+
+    if integration_env.exists():
+        return str(integration_env)
+
+    return str(default_env)
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # Backend selection: "ipfs_cluster" or "filesystem"
@@ -29,7 +42,7 @@ class Settings(BaseSettings):
 
     # API server settings (STORE_API_* or fallback to API_*)
     store_api_host: str = "0.0.0.0"
-    store_api_port: int = 8002
+    store_api_port: int = 8003
 
     # Logging
     log_level: str = "INFO"
@@ -48,4 +61,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
+    return Settings(_env_file=_resolve_env_file())

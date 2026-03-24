@@ -26,7 +26,7 @@ health_router = APIRouter(tags=["health"])
     response_model=StoreResponse,
     responses={500: {"model": ErrorResponse}},
     summary="Store content",
-    description="Store raw content and return its CID. Content-Type header determines format.",
+    description="Store raw content and return its CID.",
 )
 async def store_content(
     request: Request,
@@ -35,27 +35,21 @@ async def store_content(
     """
     Store content and return CID.
 
-    The Content-Type header is preserved for retrieval.
-    Accepts any content type: application/json, text/xml, text/plain, etc.
+    Accepts any payload: JSON, XML, text, or binary bytes.
     """
-    content_type = request.headers.get("content-type", "application/octet-stream")
-    # Strip charset and other parameters for storage
-    content_type = content_type.split(";")[0].strip()
-
     body = await request.body()
 
     if not body:
         raise HTTPException(status_code=400, detail="Empty request body")
 
     try:
-        info = await backend.store(body, content_type)
+        info = await backend.store(body)
 
-        logger.info(f"Stored content: cid={info.cid}, size={info.size}, type={content_type}")
+        logger.info(f"Stored raw content: cid={info.cid}, size={info.size}")
 
         return StoreResponse(
             cid=info.cid,
             size=info.size,
-            content_type=info.content_type,
         )
 
     except StorageError as e:
@@ -66,7 +60,7 @@ async def store_content(
 @router.get(
     "/retrieve/{cid}",
     responses={
-        200: {"description": "Raw content with original Content-Type"},
+        200: {"description": "Raw content bytes"},
         404: {"model": ErrorResponse},
         500: {"model": ErrorResponse},
     },
@@ -80,16 +74,16 @@ async def retrieve_content(
     """
     Retrieve content by CID.
 
-    Returns raw content with the original Content-Type header.
+    Returns raw content bytes.
     """
     try:
-        content, content_type = await backend.retrieve(cid)
+        content = await backend.retrieve(cid)
 
         logger.debug(f"Retrieved content: cid={cid}, size={len(content)}")
 
         return Response(
             content=content,
-            media_type=content_type,
+            media_type="application/octet-stream",
         )
 
     except ContentNotFoundError:

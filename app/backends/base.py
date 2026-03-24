@@ -6,16 +6,12 @@ All storage implementations must implement this interface.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
-
-
 @dataclass
 class ContentInfo:
     """Information about stored content."""
 
     cid: str
     size: int
-    content_type: str
 
 
 @dataclass
@@ -32,16 +28,15 @@ class StorageBackend(ABC):
     """Abstract interface for content storage backends."""
 
     @abstractmethod
-    async def store(self, content: bytes, content_type: str) -> ContentInfo:
+    async def store(self, content: bytes) -> ContentInfo:
         """
-        Store content and return content information including CID.
+        Store raw content and return content information including CID.
 
         Args:
             content: Raw bytes to store
-            content_type: MIME type (e.g., "application/json", "text/xml")
 
         Returns:
-            ContentInfo with CID, size, and content_type
+            ContentInfo with CID and size
 
         Raises:
             StorageError: If storage operation fails
@@ -49,7 +44,7 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def retrieve(self, cid: str) -> tuple[bytes, str]:
+    async def retrieve(self, cid: str) -> bytes:
         """
         Retrieve content by CID.
 
@@ -57,7 +52,7 @@ class StorageBackend(ABC):
             cid: Content identifier
 
         Returns:
-            Tuple of (content_bytes, content_type)
+            Raw content bytes
 
         Raises:
             ContentNotFoundError: If CID not found

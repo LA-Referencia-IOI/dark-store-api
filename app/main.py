@@ -1,5 +1,5 @@
 """
-dark-store-api: Stateless IPFS storage API.
+dark-store-api: Stateless raw content storage API.
 
 FastAPI application entry point.
 """
@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="dark-store-api",
-        description="Stateless IPFS storage API for the dARK project",
+        description="Stateless raw content storage API for the dARK project",
         version="0.1.0",
         docs_url="/docs",
         redoc_url="/redoc",

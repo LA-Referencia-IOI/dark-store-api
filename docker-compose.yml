@@ -1,0 +1,27 @@
+x-store-api-build: &store-api-build
+  context: ../..
+  dockerfile: services/dark-store-api/Dockerfile
+
+services:
+  store-api:
+    build: *store-api-build
+    ports:
+      - "8003:8003"
+    env_file:
+      - .env.integration
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - dark-net
+
+networks:
+  dark-net:
+    external: true
+    name: dark-net

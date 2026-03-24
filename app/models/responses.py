@@ -13,7 +13,6 @@ class StoreResponse(BaseModel):
 
     cid: str = Field(..., description="Content Identifier (CID)")
     size: int = Field(..., description="Size in bytes")
-    content_type: str = Field(..., description="MIME type of stored content")
 
 
 class StatusResponse(BaseModel):

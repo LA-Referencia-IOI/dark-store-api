@@ -25,7 +25,6 @@ class TestStoreEndpoint:
         data = response.json()
         assert "cid" in data
         assert data["size"] > 0
-        assert data["content_type"] == "application/json"
 
     def test_store_xml_content(self, client: TestClient):
         """Store XML content."""
@@ -40,7 +39,6 @@ class TestStoreEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert "cid" in data
-        assert data["content_type"] == "text/xml"
 
     def test_store_plain_text(self, client: TestClient):
         """Store plain text content."""
@@ -103,7 +101,8 @@ class TestRetrieveEndpoint:
         response = client.get(f"/v1/retrieve/{cid}")
 
         assert response.status_code == 200
-        assert response.json() == original
+        assert response.headers["content-type"].startswith("application/octet-stream")
+        assert response.content == json.dumps(original).encode("utf-8")
 
     def test_retrieve_xml_content(self, client: TestClient):
         """Retrieve XML content."""
@@ -119,7 +118,8 @@ class TestRetrieveEndpoint:
         response = client.get(f"/v1/retrieve/{cid}")
 
         assert response.status_code == 200
-        assert response.text == xml_content
+        assert response.headers["content-type"].startswith("application/octet-stream")
+        assert response.content == xml_content.encode("utf-8")
 
     def test_retrieve_not_found(self, client: TestClient):
         """Non-existent CID returns 404."""

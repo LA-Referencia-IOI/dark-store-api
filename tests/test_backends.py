@@ -24,27 +24,24 @@ class TestFileSystemBackend:
     async def test_store_and_retrieve(self, backend: FileSystemBackend):
         """Store and retrieve content."""
         content = b'{"test": "data"}'
-        content_type = "application/json"
 
-        info = await backend.store(content, content_type)
+        info = await backend.store(content)
 
         assert info.cid is not None
         assert info.size == len(content)
-        assert info.content_type == content_type
 
         # Retrieve
-        retrieved, ret_type = await backend.retrieve(info.cid)
+        retrieved = await backend.retrieve(info.cid)
 
         assert retrieved == content
-        assert ret_type == content_type
 
     @pytest.mark.asyncio
     async def test_content_addressable(self, backend: FileSystemBackend):
         """Same content produces same CID."""
         content = b"reproducible content"
 
-        info1 = await backend.store(content, "text/plain")
-        info2 = await backend.store(content, "text/plain")
+        info1 = await backend.store(content)
+        info2 = await backend.store(content)
 
         assert info1.cid == info2.cid
 
@@ -57,7 +54,7 @@ class TestFileSystemBackend:
     @pytest.mark.asyncio
     async def test_status_pinned(self, backend: FileSystemBackend):
         """Status shows pinned for stored content."""
-        info = await backend.store(b"test", "text/plain")
+        info = await backend.store(b"test")
 
         status = await backend.status(info.cid)
 
@@ -83,7 +80,7 @@ class TestFileSystemBackend:
         """Store and retrieve binary content."""
         content = bytes(range(256))  # All byte values
 
-        info = await backend.store(content, "application/octet-stream")
-        retrieved, _ = await backend.retrieve(info.cid)
+        info = await backend.store(content)
+        retrieved = await backend.retrieve(info.cid)
 
         assert retrieved == content
