@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # IPFS endpoints (from dark-ipfs cluster)
     ipfs_api_url: str = "http://localhost:5001"
     ipfs_cluster_api_url: str = "http://localhost:9094"
+    ipfs_cluster_proxy_api_url: str = "http://localhost:9095"
+    ipfs_add_mode: str = "cluster_proxy"
+    ipfs_health_cache_ttl_seconds: float = 10.0
+    ipfs_cluster_min_peers: int = 2
 
     # Filesystem backend (for dev/test only)
     filesystem_storage_path: str = "./storage"

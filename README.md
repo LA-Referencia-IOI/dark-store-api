@@ -23,7 +23,8 @@ The service can run on:
 | `POST` | `/v1/store` | Store raw bytes and return a CID |
 | `GET` | `/v1/retrieve/{cid}` | Retrieve raw bytes by CID |
 | `GET` | `/v1/status/{cid}` | Get pin / replication status |
-| `GET` | `/health` | Service health check |
+| `GET` | `/health/live` | Lightweight process liveness check |
+| `GET` | `/health` | Cached storage readiness check |
 
 ### Store
 
@@ -55,8 +56,12 @@ The response body is raw content bytes. `application/octet-stream` is used as th
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STORAGE_BACKEND` | `ipfs_cluster` | Backend type: `ipfs_cluster` or `filesystem` |
-| `IPFS_API_URL` | `http://localhost:5001` | IPFS node API endpoint |
+| `IPFS_ADD_MODE` | `cluster_proxy` | Write mode: `cluster_proxy` or explicit legacy `ipfs_then_cluster` |
+| `IPFS_API_URL` | `http://localhost:5001` | Local IPFS node API endpoint used for `cat`, health, and legacy add mode |
 | `IPFS_CLUSTER_API_URL` | `http://localhost:9094` | IPFS Cluster REST API endpoint |
+| `IPFS_CLUSTER_PROXY_API_URL` | `http://localhost:9095` | IPFS Cluster Proxy endpoint used by default for writes |
+| `IPFS_CLUSTER_MIN_PEERS` | `2` | Minimum visible IPFS Cluster peers required for `/health` to report healthy |
+| `IPFS_HEALTH_CACHE_TTL_SECONDS` | `10` | Readiness cache TTL for `/health` |
 | `FILESYSTEM_STORAGE_PATH` | `./storage` | Path for filesystem backend |
 | `STORE_API_HOST` | `0.0.0.0` | API bind address |
 | `STORE_API_PORT` | `8003` | API port |
@@ -72,8 +77,10 @@ The component ships with:
 In the installed stack:
 
 - host port `8003` exposes `dark-store-api`
-- the container joins `dark-net`
-- the service talks to `dark-ipfs` through the host IPFS endpoints
+- the container joins `dark-net` and `dark-ipfs-store-node`
+- Docker healthcheck calls `/health/live`, which does not touch IPFS or Cluster
+- `/health` is readiness: it checks local `ipfs0`, local `cluster0`, and visible Cluster peers, with a short cache
+- by default, writes go through `cluster0` Proxy (`/api/v0/add?cid-version=1&pin=true`) and Cluster handles replication
 
 ## Integration with dARK
 

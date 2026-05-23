@@ -136,17 +136,36 @@ async def get_status(
     description="Check API and backend health.",
 )
 async def health_check(
+    refresh: bool = False,
     backend: StorageBackend = Depends(get_storage_backend),
 ) -> HealthResponse:
     """
     Check API and storage backend health.
     """
     settings = get_settings()
-    backend_healthy = await backend.health_check()
+    backend_healthy = await backend.health_check(refresh=refresh)
+    backend_detail = getattr(backend, "last_health", {}) or {}
 
     return HealthResponse(
         status="healthy" if backend_healthy else "unhealthy",
         backend=settings.storage_backend,
         backend_healthy=backend_healthy,
+        min_cluster_peers=backend_detail.get("min_cluster_peers"),
+        available_cluster_peers=backend_detail.get("available_cluster_peers"),
+        error=backend_detail.get("error"),
+        cached=bool(backend_detail.get("cached", False)),
+        checked_at=backend_detail.get("checked_at"),
+        cache_ttl_seconds=backend_detail.get("cache_ttl_seconds"),
+        add_mode=backend_detail.get("add_mode"),
         timestamp=datetime.now(timezone.utc),
     )
+
+
+@health_router.get(
+    "/health/live",
+    summary="Liveness check",
+    description="Check that the Store API process is alive without touching the storage backend.",
+)
+async def liveness_check() -> dict[str, str]:
+    """Lightweight liveness check for Docker and load balancers."""
+    return {"status": "alive"}

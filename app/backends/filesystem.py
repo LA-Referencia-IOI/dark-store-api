@@ -112,8 +112,9 @@ class FileSystemBackend(StorageBackend):
             status="pinned",
         )
 
-    async def health_check(self) -> bool:
+    async def health_check(self, refresh: bool = False) -> bool:
         """Check if storage directory is accessible."""
+        del refresh
         try:
             if not self.storage_path.exists():
                 logger.error(f"Storage directory does not exist: {self.storage_path}")

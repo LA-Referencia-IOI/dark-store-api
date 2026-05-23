@@ -171,3 +171,22 @@ class TestHealthEndpoint:
         assert data["backend"] == "filesystem"
         assert data["backend_healthy"] is True
         assert "timestamp" in data
+        assert data["cached"] is False
+
+    def test_liveness_check_does_not_require_backend(self):
+        """Liveness endpoint should not touch the storage backend."""
+        from app.dependencies import get_storage_backend
+        from app.main import app
+
+        def broken_backend():
+            raise AssertionError("storage backend should not be requested")
+
+        app.dependency_overrides[get_storage_backend] = broken_backend
+        try:
+            with TestClient(app) as client:
+                response = client.get("/health/live")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "alive"}

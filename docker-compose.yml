@@ -9,10 +9,8 @@ services:
       - "8003:8003"
     env_file:
       - .env.integration
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health/live')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -20,8 +18,12 @@ services:
     restart: unless-stopped
     networks:
       - dark-net
+      - dark-ipfs-store-node
 
 networks:
   dark-net:
     external: true
     name: dark-net
+  dark-ipfs-store-node:
+    external: true
+    name: dark-ipfs-store-node

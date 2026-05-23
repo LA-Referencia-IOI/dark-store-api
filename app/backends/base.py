@@ -6,6 +6,8 @@ All storage implementations must implement this interface.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
+
 @dataclass
 class ContentInfo:
     """Information about stored content."""
@@ -77,9 +79,12 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    async def health_check(self) -> bool:
+    async def health_check(self, refresh: bool = False) -> bool:
         """
         Check if storage backend is healthy and accessible.
+
+        Args:
+            refresh: Force a fresh backend check when a backend supports caching.
 
         Returns:
             True if healthy, False otherwise

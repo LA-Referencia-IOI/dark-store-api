@@ -24,6 +24,10 @@ def get_storage_backend() -> StorageBackend:
         return IPFSClusterBackend(
             ipfs_api_url=settings.ipfs_api_url,
             cluster_api_url=settings.ipfs_cluster_api_url,
+            cluster_proxy_api_url=settings.ipfs_cluster_proxy_api_url,
+            add_mode=settings.ipfs_add_mode,
+            health_cache_ttl_seconds=settings.ipfs_health_cache_ttl_seconds,
+            min_cluster_peers=settings.ipfs_cluster_min_peers,
         )
     else:
         raise ValueError(f"Unknown storage backend: {settings.storage_backend}")
