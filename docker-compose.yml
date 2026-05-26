@@ -18,12 +18,8 @@ services:
     restart: unless-stopped
     networks:
       - dark-net
-      - dark-ipfs-store-node
 
 networks:
   dark-net:
     external: true
     name: dark-net
-  dark-ipfs-store-node:
-    external: true
-    name: dark-ipfs-store-node

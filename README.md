@@ -77,7 +77,8 @@ The component ships with:
 In the installed stack:
 
 - host port `8003` exposes `dark-store-api`
-- the container joins `dark-net` and `dark-ipfs-store-node`
+- the container joins `dark-net`
+- `ipfs0` and `cluster0` are also attached to `dark-net` by the `dark-ipfs` compose stack
 - Docker healthcheck calls `/health/live`, which does not touch IPFS or Cluster
 - `/health` is readiness: it checks local `ipfs0`, local `cluster0`, and visible Cluster peers, with a short cache
 - by default, writes go through `cluster0` Proxy (`/api/v0/add?cid-version=1&pin=true`) and Cluster handles replication
