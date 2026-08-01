@@ -9,10 +9,21 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
 
-from ..backends.base import StorageBackend, ContentNotFoundError, StorageError
+from ..backends.base import (
+    StorageBackend,
+    ContentNotFoundError,
+    ReplicationQuorumError,
+    StorageError,
+)
 from ..config import get_settings
 from ..dependencies import get_storage_backend
-from ..models.responses import StoreResponse, StatusResponse, HealthResponse, ErrorResponse
+from ..models.responses import (
+    ErrorResponse,
+    HealthResponse,
+    ReplicationResponse,
+    StatusResponse,
+    StoreResponse,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +35,7 @@ health_router = APIRouter(tags=["health"])
 @router.post(
     "/store",
     response_model=StoreResponse,
-    responses={500: {"model": ErrorResponse}},
+    responses={500: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
     summary="Store content",
     description="Store raw content and return its CID.",
 )
@@ -50,8 +61,16 @@ async def store_content(
         return StoreResponse(
             cid=info.cid,
             size=info.size,
+            replication=(
+                ReplicationResponse(**vars(info.replication))
+                if info.replication is not None
+                else None
+            ),
         )
 
+    except ReplicationQuorumError as e:
+        logger.warning("Replication quorum not reached: %s", e)
+        raise HTTPException(status_code=503, detail=str(e), headers={"Retry-After": "5"})
     except StorageError as e:
         logger.error(f"Storage error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -136,6 +155,7 @@ async def get_status(
     description="Check API and backend health.",
 )
 async def health_check(
+    response: Response,
     refresh: bool = False,
     backend: StorageBackend = Depends(get_storage_backend),
 ) -> HealthResponse:
@@ -143,7 +163,10 @@ async def health_check(
     Check API and storage backend health.
     """
     settings = get_settings()
-    backend_healthy = await backend.health_check(refresh=refresh)
+    write_check = getattr(backend, "write_health_check", None) or backend.health_check
+    backend_healthy = await write_check(refresh=refresh)
+    if not backend_healthy:
+        response.status_code = 503
     backend_detail = getattr(backend, "last_health", {}) or {}
 
     return HealthResponse(
@@ -152,6 +175,10 @@ async def health_check(
         backend_healthy=backend_healthy,
         min_cluster_peers=backend_detail.get("min_cluster_peers"),
         available_cluster_peers=backend_detail.get("available_cluster_peers"),
+        min_cluster_sites=backend_detail.get("min_cluster_sites"),
+        available_cluster_sites=backend_detail.get("available_cluster_sites"),
+        expected_cluster_peers=backend_detail.get("expected_cluster_peers"),
+        dimension=backend_detail.get("dimension", "write"),
         error=backend_detail.get("error"),
         cached=bool(backend_detail.get("cached", False)),
         checked_at=backend_detail.get("checked_at"),
@@ -159,6 +186,46 @@ async def health_check(
         add_mode=backend_detail.get("add_mode"),
         timestamp=datetime.now(timezone.utc),
     )
+
+
+@health_router.get(
+    "/health/read",
+    response_model=HealthResponse,
+    summary="Read readiness",
+    description="Check that at least one site-local Kubo endpoint is usable.",
+)
+async def read_health_check(
+    response: Response,
+    backend: StorageBackend = Depends(get_storage_backend),
+) -> HealthResponse:
+    settings = get_settings()
+    read_check = getattr(backend, "read_health_check", None) or backend.health_check
+    backend_healthy = await read_check()
+    if not backend_healthy:
+        response.status_code = 503
+    detail = getattr(backend, "last_health", {}) or {}
+    return HealthResponse(
+        status="healthy" if backend_healthy else "unhealthy",
+        backend=settings.storage_backend,
+        backend_healthy=backend_healthy,
+        dimension=detail.get("dimension", "read"),
+        error=detail.get("error"),
+        timestamp=datetime.now(timezone.utc),
+    )
+
+
+@health_router.get(
+    "/health/write",
+    response_model=HealthResponse,
+    summary="Write readiness",
+    description="Check local endpoints and the configured global peer/site quorum.",
+)
+async def write_health_check(
+    response: Response,
+    refresh: bool = False,
+    backend: StorageBackend = Depends(get_storage_backend),
+) -> HealthResponse:
+    return await health_check(response=response, refresh=refresh, backend=backend)
 
 
 @health_router.get(

@@ -6,6 +6,7 @@ Uses Pydantic Settings for environment variable management.
 
 from functools import lru_cache
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,13 +34,19 @@ class Settings(BaseSettings):
     # Backend selection: "ipfs_cluster" or "filesystem"
     storage_backend: str = "ipfs_cluster"
 
-    # IPFS endpoints (from dark-ipfs cluster)
-    ipfs_api_url: str = "http://localhost:5001"
-    ipfs_cluster_api_url: str = "http://localhost:9094"
-    ipfs_cluster_proxy_api_url: str = "http://localhost:9095"
+    # Both site-local storage nodes. Values are JSON arrays in the environment.
+    ipfs_api_urls_json: list[str] = Field(default_factory=list)
+    ipfs_cluster_api_urls_json: list[str] = Field(default_factory=list)
+    ipfs_cluster_proxy_api_urls_json: list[str] = Field(default_factory=list)
+    # Maps Cluster peer names (the topology node IDs) to site IDs.
+    ipfs_cluster_peer_sites_json: dict[str, str] = Field(default_factory=dict)
     ipfs_add_mode: str = "cluster_proxy"
     ipfs_health_cache_ttl_seconds: float = 10.0
-    ipfs_cluster_min_peers: int = 2
+    ipfs_cluster_expected_peers: int = 2
+    ipfs_cluster_write_min_peers: int = 1
+    ipfs_cluster_write_min_sites: int = 1
+    ipfs_replication_confirm_timeout_seconds: float = 120.0
+    ipfs_replication_confirm_interval_seconds: float = 2.0
 
     # Filesystem backend (for dev/test only)
     filesystem_storage_path: str = "./storage"

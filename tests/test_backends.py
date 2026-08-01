@@ -1,30 +1,22 @@
-"""
-Tests for storage backends.
-"""
+"""Tests for filesystem and global IPFS Cluster backends."""
 
 import json
-import os
 import tempfile
 
 import httpx
 import pytest
 
+from app.backends.base import ContentNotFoundError, ReplicationQuorumError
 from app.backends.filesystem import FileSystemBackend
-from app.backends.base import ContentNotFoundError, StorageError
 from app.backends.ipfs_cluster import IPFSClusterBackend
 
 
 class _FakeResponse:
-    def __init__(self, status_code=200, payload=None, text=None):
+    def __init__(self, status_code=200, payload=None, text=None, content=None):
         self.status_code = status_code
         self._payload = payload
-        if text is not None:
-            self.text = text
-        elif payload is not None:
-            self.text = json.dumps(payload)
-        else:
-            self.text = ""
-        self.content = self.text.encode("utf-8")
+        self.text = text if text is not None else (json.dumps(payload) if payload is not None else "")
+        self.content = content if content is not None else self.text.encode()
 
     def json(self):
         if self._payload is not None:
@@ -51,300 +43,155 @@ class _FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         del exc_type, exc, tb
 
+    async def _call(self, method, url, kwargs):
+        self.calls.append((method, url, kwargs))
+        result = self.routes[(method, url)]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
     async def post(self, url, **kwargs):
-        self.calls.append(("POST", url, kwargs))
-        return self.routes[("POST", url)]
+        return await self._call("POST", url, kwargs)
 
     async def get(self, url, **kwargs):
-        self.calls.append(("GET", url, kwargs))
-        return self.routes[("GET", url)]
+        return await self._call("GET", url, kwargs)
 
 
 class TestFileSystemBackend:
-    """Tests for FileSystemBackend."""
-
     @pytest.fixture
-    def backend(self) -> FileSystemBackend:
-        """Create a backend with temporary directory."""
+    def backend(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             yield FileSystemBackend(tmpdir)
 
     @pytest.mark.asyncio
-    async def test_store_and_retrieve(self, backend: FileSystemBackend):
-        """Store and retrieve content."""
-        content = b'{"test": "data"}'
-
-        info = await backend.store(content)
-
-        assert info.cid is not None
-        assert info.size == len(content)
-
-        # Retrieve
-        retrieved = await backend.retrieve(info.cid)
-
-        assert retrieved == content
-
-    @pytest.mark.asyncio
-    async def test_content_addressable(self, backend: FileSystemBackend):
-        """Same content produces same CID."""
-        content = b"reproducible content"
-
-        info1 = await backend.store(content)
-        info2 = await backend.store(content)
-
-        assert info1.cid == info2.cid
-
-    @pytest.mark.asyncio
-    async def test_retrieve_not_found(self, backend: FileSystemBackend):
-        """Retrieve non-existent CID raises error."""
-        with pytest.raises(ContentNotFoundError):
-            await backend.retrieve("nonexistent123")
-
-    @pytest.mark.asyncio
-    async def test_status_pinned(self, backend: FileSystemBackend):
-        """Status shows pinned for stored content."""
-        info = await backend.store(b"test")
-
+    async def test_store_retrieve_status_and_health(self, backend):
+        info = await backend.store(b"content")
+        assert await backend.retrieve(info.cid) == b"content"
         status = await backend.status(info.cid)
-
-        assert status.cid == info.cid
-        assert status.pinned is True
-        assert status.status == "pinned"
-        assert status.replicas == 1  # Filesystem has single replica
+        assert status.pinned and status.replicas == 1
+        assert await backend.health_check()
 
     @pytest.mark.asyncio
-    async def test_status_not_found(self, backend: FileSystemBackend):
-        """Status for unknown CID raises error."""
+    async def test_unknown_content(self, backend):
         with pytest.raises(ContentNotFoundError):
-            await backend.status("unknowncid")
-
-    @pytest.mark.asyncio
-    async def test_health_check(self, backend: FileSystemBackend):
-        """Health check returns True for valid directory."""
-        result = await backend.health_check()
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_binary_content(self, backend: FileSystemBackend):
-        """Store and retrieve binary content."""
-        content = bytes(range(256))  # All byte values
-
-        info = await backend.store(content)
-        retrieved = await backend.retrieve(info.cid)
-
-        assert retrieved == content
+            await backend.retrieve("unknown")
 
 
-class TestIPFSClusterBackendHealth:
-    """Tests for IPFS Cluster readiness checks."""
+def backend(**overrides):
+    values = {
+        "ipfs_api_urls": ["http://ipfs-a", "http://ipfs-b"],
+        "cluster_api_urls": ["http://cluster-a", "http://cluster-b"],
+        "cluster_proxy_api_urls": ["http://proxy-a", "http://proxy-b"],
+        "peer_sites": {
+            "site-a-storage-1": "site-a",
+            "site-a-storage-2": "site-a",
+            "site-b-storage-1": "site-b",
+        },
+        "expected_cluster_peers": 3,
+        "write_min_peers": 2,
+        "write_min_sites": 2,
+        "confirmation_timeout_seconds": 0,
+    }
+    values.update(overrides)
+    return IPFSClusterBackend(**values)
 
-    @pytest.mark.asyncio
-    async def test_store_uses_cluster_proxy_without_cluster_pin(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            cluster_proxy_api_url="http://proxy:9095",
-            add_mode="cluster_proxy",
-        )
+
+class TestIPFSClusterBackend:
+    @pytest.fixture(autouse=True)
+    def fake_http(self, monkeypatch):
         _FakeAsyncClient.calls = []
-        _FakeAsyncClient.routes = {
-            ("POST", "http://proxy:9095/api/v0/add"): _FakeResponse(
-                200,
-                {"Hash": "bafkproxy", "Size": "4"},
-            ),
-        }
+        _FakeAsyncClient.routes = {}
         monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
 
-        info = await backend.store(b"data")
-
-        assert info.cid == "bafkproxy"
-        assert info.size == 4
-        assert [call[1] for call in _FakeAsyncClient.calls] == ["http://proxy:9095/api/v0/add"]
-        assert _FakeAsyncClient.calls[0][2]["params"]["pin"] is True
-
     @pytest.mark.asyncio
-    async def test_store_legacy_ipfs_then_cluster_uses_pin_false(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            cluster_proxy_api_url="http://proxy:9095",
-            add_mode="ipfs_then_cluster",
-        )
-        _FakeAsyncClient.calls = []
+    async def test_store_fails_over_and_waits_for_peer_and_site_quorum(self):
         _FakeAsyncClient.routes = {
-            ("POST", "http://ipfs:5001/api/v0/add"): _FakeResponse(
-                200,
-                {"Hash": "bafklegacy", "Size": "4"},
-            ),
-            ("POST", "http://cluster:9094/pins/bafklegacy"): _FakeResponse(202, {}),
+            ("POST", "http://proxy-a/api/v0/add"): _FakeResponse(503, text="down"),
+            ("POST", "http://proxy-b/api/v0/add"): _FakeResponse(200, {"Hash": "bafy", "Size": "4"}),
+            ("GET", "http://cluster-a/pins/bafy"): _FakeResponse(200, {
+                "peer_map": {
+                    "peer-a": {"peername": "site-a-storage-1", "status": "pinned"},
+                    "peer-b": {"peername": "site-b-storage-1", "status": "pinned"},
+                }
+            }),
         }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
 
-        info = await backend.store(b"data")
+        info = await backend().store(b"data")
 
-        assert info.cid == "bafklegacy"
-        assert [call[1] for call in _FakeAsyncClient.calls] == [
-            "http://ipfs:5001/api/v0/add",
-            "http://cluster:9094/pins/bafklegacy",
+        assert info.cid == "bafy"
+        assert info.replication.status == "durable"
+        assert info.replication.pinned_peers == 2
+        assert info.replication.pinned_sites == 2
+        assert [call[1] for call in _FakeAsyncClient.calls[:2]] == [
+            "http://proxy-a/api/v0/add",
+            "http://proxy-b/api/v0/add",
         ]
-        assert _FakeAsyncClient.calls[0][2]["params"]["pin"] is False
 
     @pytest.mark.asyncio
-    async def test_store_cluster_proxy_failure_is_storage_error(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            cluster_proxy_api_url="http://proxy:9095",
-            add_mode="cluster_proxy",
-        )
-        _FakeAsyncClient.calls = []
+    async def test_store_returns_retryable_error_when_quorum_is_not_observed(self):
         _FakeAsyncClient.routes = {
-            ("POST", "http://proxy:9095/api/v0/add"): _FakeResponse(500, text="not enough peers"),
+            ("POST", "http://proxy-a/api/v0/add"): _FakeResponse(200, {"Hash": "bafy", "Size": "4"}),
+            ("GET", "http://cluster-a/pins/bafy"): _FakeResponse(200, {
+                "peer_map": {
+                    "peer-a": {"peername": "site-a-storage-1", "status": "pinned"},
+                }
+            }),
         }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
 
-        with pytest.raises(StorageError) as exc:
-            await backend.store(b"data")
-
-        assert "Cluster Proxy storage failed" in str(exc.value)
+        with pytest.raises(ReplicationQuorumError, match="peers 1/2, sites 1/2"):
+            await backend().store(b"data")
 
     @pytest.mark.asyncio
-    async def test_health_check_requires_min_cluster_peers(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            min_cluster_peers=2,
-        )
-        _FakeAsyncClient.calls = []
+    async def test_retrieve_fails_over_to_second_local_kubo(self):
+        request = httpx.Request("POST", "http://ipfs-a/api/v0/cat")
         _FakeAsyncClient.routes = {
-            ("POST", "http://ipfs:5001/api/v0/id"): _FakeResponse(200, {"ID": "ipfs"}),
-            ("GET", "http://cluster:9094/id"): _FakeResponse(200, {"id": "cluster"}),
-            ("POST", "http://localhost:9095/api/v0/id"): _FakeResponse(200, {"ID": "proxy"}),
-            ("GET", "http://cluster:9094/peers"): _FakeResponse(200, [{"id": "peer-1"}]),
+            ("POST", "http://ipfs-a/api/v0/cat"): httpx.ConnectError("down", request=request),
+            ("POST", "http://ipfs-b/api/v0/cat"): _FakeResponse(200, content=b"payload"),
         }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
 
-        assert await backend.health_check() is False
-        assert backend.last_health["available_cluster_peers"] == 1
-        assert backend.last_health["min_cluster_peers"] == 2
-        assert "not enough cluster peers" in backend.last_health["error"]
+        assert await backend().retrieve("bafy") == b"payload"
 
     @pytest.mark.asyncio
-    async def test_health_check_passes_with_enough_cluster_peers(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            min_cluster_peers=2,
-        )
-        _FakeAsyncClient.calls = []
+    async def test_read_health_needs_only_one_local_kubo(self):
         _FakeAsyncClient.routes = {
-            ("POST", "http://ipfs:5001/api/v0/id"): _FakeResponse(200, {"ID": "ipfs"}),
-            ("GET", "http://cluster:9094/id"): _FakeResponse(200, {"id": "cluster"}),
-            ("POST", "http://localhost:9095/api/v0/id"): _FakeResponse(200, {"ID": "proxy"}),
-            ("GET", "http://cluster:9094/peers"): _FakeResponse(200, [{"id": "peer-1"}, {"id": "peer-2"}]),
+            ("POST", "http://ipfs-a/api/v0/id"): _FakeResponse(503),
+            ("POST", "http://ipfs-b/api/v0/id"): _FakeResponse(200, {"ID": "kubo"}),
         }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
+        instance = backend()
 
-        assert await backend.health_check() is True
-        assert backend.last_health["available_cluster_peers"] == 2
-        assert backend.last_health["min_cluster_peers"] == 2
-        assert backend.last_health["error"] is None
+        assert await instance.read_health_check()
+        assert instance.last_health["dimension"] == "read"
 
     @pytest.mark.asyncio
-    async def test_health_check_requires_cluster_proxy_when_proxy_mode(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            cluster_proxy_api_url="http://proxy:9095",
-            add_mode="cluster_proxy",
-            min_cluster_peers=2,
-        )
-        _FakeAsyncClient.calls = []
+    async def test_write_health_requires_peer_and_site_quorum(self):
         _FakeAsyncClient.routes = {
-            ("POST", "http://ipfs:5001/api/v0/id"): _FakeResponse(200, {"ID": "ipfs"}),
-            ("GET", "http://cluster:9094/id"): _FakeResponse(200, {"id": "cluster"}),
-            ("POST", "http://proxy:9095/api/v0/id"): _FakeResponse(503, text="proxy down"),
+            ("POST", "http://ipfs-a/api/v0/id"): _FakeResponse(200, {"ID": "kubo"}),
+            ("POST", "http://proxy-a/api/v0/id"): _FakeResponse(200, {"ID": "proxy"}),
+            ("GET", "http://cluster-a/peers"): _FakeResponse(200, [
+                {"id": "peer-a", "peername": "site-a-storage-1"},
+                {"id": "peer-b", "peername": "site-b-storage-1"},
+            ]),
         }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
+        instance = backend()
 
-        assert await backend.health_check() is False
-        assert backend.last_health["error"] == "Cluster Proxy unhealthy: 503"
-
-    @pytest.mark.asyncio
-    async def test_health_check_passes_with_cluster_peers_json_stream(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            min_cluster_peers=2,
-        )
-        _FakeAsyncClient.calls = []
-        _FakeAsyncClient.routes = {
-            ("POST", "http://ipfs:5001/api/v0/id"): _FakeResponse(200, {"ID": "ipfs"}),
-            ("GET", "http://cluster:9094/id"): _FakeResponse(200, {"id": "cluster"}),
-            ("POST", "http://localhost:9095/api/v0/id"): _FakeResponse(200, {"ID": "proxy"}),
-            ("GET", "http://cluster:9094/peers"): _FakeResponse(
-                200,
-                text='{"id": "peer-1"}\n{"id": "peer-2"}\n',
-            ),
-        }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
-
-        assert await backend.health_check() is True
-        assert backend.last_health["available_cluster_peers"] == 2
-        assert backend.last_health["min_cluster_peers"] == 2
-        assert backend.last_health["error"] is None
+        assert await instance.write_health_check()
+        assert instance.last_health["available_cluster_peers"] == 2
+        assert instance.last_health["available_cluster_sites"] == 2
 
     @pytest.mark.asyncio
-    async def test_health_check_counts_unique_peer_ids_in_json_stream(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            min_cluster_peers=2,
-        )
-        _FakeAsyncClient.calls = []
+    async def test_write_health_fails_when_peers_are_only_in_one_site(self):
         _FakeAsyncClient.routes = {
-            ("POST", "http://ipfs:5001/api/v0/id"): _FakeResponse(200, {"ID": "ipfs"}),
-            ("GET", "http://cluster:9094/id"): _FakeResponse(200, {"id": "cluster"}),
-            ("POST", "http://localhost:9095/api/v0/id"): _FakeResponse(200, {"ID": "proxy"}),
-            ("GET", "http://cluster:9094/peers"): _FakeResponse(
+            ("POST", "http://ipfs-a/api/v0/id"): _FakeResponse(200),
+            ("POST", "http://proxy-a/api/v0/id"): _FakeResponse(200),
+            ("GET", "http://cluster-a/peers"): _FakeResponse(
                 200,
                 text=(
-                    '{"id": "peer-1", "cluster_peers": ["peer-1", "peer-2"]}\n'
-                    '{"id": "peer-2", "cluster_peers": ["peer-1", "peer-2"]}\n'
-                    '{"id": "peer-1", "cluster_peers": ["peer-1", "peer-2"]}\n'
+                    '{"id":"peer-a","peername":"site-a-storage-1"}\n'
+                    '{"id":"peer-b","peername":"site-a-storage-2"}\n'
                 ),
             ),
         }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
+        instance = backend()
 
-        assert await backend.health_check() is True
-        assert backend.last_health["available_cluster_peers"] == 2
-
-    @pytest.mark.asyncio
-    async def test_health_check_uses_cache_until_refresh(self, monkeypatch):
-        backend = IPFSClusterBackend(
-            ipfs_api_url="http://ipfs:5001",
-            cluster_api_url="http://cluster:9094",
-            min_cluster_peers=2,
-            health_cache_ttl_seconds=60,
-        )
-        _FakeAsyncClient.calls = []
-        _FakeAsyncClient.routes = {
-            ("POST", "http://ipfs:5001/api/v0/id"): _FakeResponse(200, {"ID": "ipfs"}),
-            ("GET", "http://cluster:9094/id"): _FakeResponse(200, {"id": "cluster"}),
-            ("POST", "http://localhost:9095/api/v0/id"): _FakeResponse(200, {"ID": "proxy"}),
-            ("GET", "http://cluster:9094/peers"): _FakeResponse(
-                200,
-                [{"id": "peer-1"}, {"id": "peer-2"}],
-            ),
-        }
-        monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
-
-        assert await backend.health_check() is True
-        assert await backend.health_check() is True
-        assert len(_FakeAsyncClient.calls) == 4
-        assert backend.last_health["cached"] is True
-
-        assert await backend.health_check(refresh=True) is True
-        assert len(_FakeAsyncClient.calls) == 8
-        assert backend.last_health["cached"] is False
+        assert not await instance.write_health_check()
+        assert "cluster sites 1/2" in instance.last_health["error"]

@@ -81,6 +81,26 @@ class TestStoreEndpoint:
 
         assert response1.json()["cid"] == response2.json()["cid"]
 
+    def test_replication_quorum_failure_is_retryable(self):
+        from app.backends.base import ReplicationQuorumError
+        from app.dependencies import get_storage_backend
+        from app.main import app
+
+        class UnavailableBackend:
+            async def store(self, content):
+                del content
+                raise ReplicationQuorumError("replication quorum not reached")
+
+        app.dependency_overrides[get_storage_backend] = lambda: UnavailableBackend()
+        try:
+            with TestClient(app) as test_client:
+                response = test_client.post("/v1/store", content=b"data")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "5"
+
 
 class TestRetrieveEndpoint:
     """Tests for GET /v1/retrieve/{cid}."""
@@ -190,3 +210,23 @@ class TestHealthEndpoint:
 
         assert response.status_code == 200
         assert response.json() == {"status": "alive"}
+
+    def test_unhealthy_readiness_uses_503(self):
+        from app.dependencies import get_storage_backend
+        from app.main import app
+
+        class UnhealthyBackend:
+            last_health = {"dimension": "read", "error": "no local Kubo endpoint is healthy"}
+
+            async def read_health_check(self):
+                return False
+
+        app.dependency_overrides[get_storage_backend] = lambda: UnhealthyBackend()
+        try:
+            with TestClient(app) as test_client:
+                response = test_client.get("/health/read")
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 503
+        assert response.json()["dimension"] == "read"

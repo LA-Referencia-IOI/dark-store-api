@@ -9,11 +9,22 @@ from dataclasses import dataclass
 
 
 @dataclass
+class ReplicationInfo:
+    """Observed durable replication after a write."""
+
+    status: str
+    pinned_peers: int
+    pinned_sites: int
+    target_peers: int
+
+
+@dataclass
 class ContentInfo:
     """Information about stored content."""
 
     cid: str
     size: int
+    replication: ReplicationInfo | None = None
 
 
 @dataclass
@@ -94,6 +105,12 @@ class StorageBackend(ABC):
 
 class StorageError(Exception):
     """Base exception for storage errors."""
+
+    pass
+
+
+class ReplicationQuorumError(StorageError):
+    """A pin exists but did not reach the configured durable write quorum."""
 
     pass
 
