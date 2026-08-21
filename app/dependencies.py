@@ -26,13 +26,9 @@ def get_storage_backend() -> StorageBackend:
             cluster_api_urls=settings.ipfs_cluster_api_urls_json,
             cluster_proxy_api_urls=settings.ipfs_cluster_proxy_api_urls_json,
             peer_sites=settings.ipfs_cluster_peer_sites_json,
-            add_mode=settings.ipfs_add_mode,
+            local_site_id=settings.ipfs_cluster_local_site_id,
             health_cache_ttl_seconds=settings.ipfs_health_cache_ttl_seconds,
-            expected_cluster_peers=settings.ipfs_cluster_expected_peers,
-            write_min_peers=settings.ipfs_cluster_write_min_peers,
-            write_min_sites=settings.ipfs_cluster_write_min_sites,
             confirmation_timeout_seconds=settings.ipfs_replication_confirm_timeout_seconds,
-            confirmation_interval_seconds=settings.ipfs_replication_confirm_interval_seconds,
         )
     else:
         raise ValueError(f"Unknown storage backend: {settings.storage_backend}")

@@ -10,30 +10,33 @@ global CRDT cluster, so Store APIs never call one another.
 
 | Method | Endpoint | Meaning |
 | --- | --- | --- |
-| `POST` | `/v1/store` | Add through a local Cluster Proxy and wait for durable quorum |
+| `POST` | `/v1/store` | Add through a local Cluster Proxy and confirm one pinned peer |
 | `GET` | `/v1/retrieve/{cid}` | Read through either local Kubo |
 | `GET` | `/v1/status/{cid}` | Observe global pin status |
 | `GET` | `/health/live` | Process liveness only |
 | `GET` | `/health/read` | At least one local Kubo is usable |
-| `GET` | `/health/write` | Local write path plus peer/site quorum is usable |
+| `GET` | `/health/write` | At least one local write path and one known Cluster peer are usable |
 | `GET` | `/health` | Alias of write readiness |
 
-A successful write includes the durability evidence observed before returning:
+A successful write includes the live replication snapshot observed after the
+first pin:
 
 ```json
 {
   "cid": "bafy...",
   "size": 14520,
   "replication": {
-    "status": "durable",
-    "pinned_peers": 3,
-    "pinned_sites": 2,
-    "target_peers": 4
+    "total_replicas": 1,
+    "local_replicas": 1,
+    "remote_replicas": 0,
+    "sites": {"site-a": 1},
+    "purge_target_met": false,
+    "checked_at": "2026-08-21T12:00:00Z"
   }
 }
 ```
 
-If the configured peer/site quorum is not reached before the timeout, the API
+If the first pin is not observed before the timeout, the API
 returns `503 Service Unavailable` with `Retry-After: 5`. The partial immutable
 pin is left for Cluster recovery; Store API never unpins automatically.
 
@@ -47,15 +50,15 @@ The deployer generates `.env.integration` from the shared topology.
 | `IPFS_CLUSTER_API_URLS_JSON` | Ordered local Cluster REST endpoints |
 | `IPFS_CLUSTER_PROXY_API_URLS_JSON` | Ordered local Cluster Proxy endpoints |
 | `IPFS_CLUSTER_PEER_SITES_JSON` | Cluster peer-name to site mapping |
-| `IPFS_CLUSTER_EXPECTED_PEERS` | Total peers in the topology |
-| `IPFS_CLUSTER_WRITE_MIN_PEERS` | Actual pinned/healthy peers required |
-| `IPFS_CLUSTER_WRITE_MIN_SITES` | Actual pinned/healthy sites required |
+| `IPFS_CLUSTER_LOCAL_SITE_ID` | Site whose two endpoints are local to this Store API |
 | `IPFS_REPLICATION_CONFIRM_TIMEOUT_SECONDS` | Maximum durability wait |
-| `IPFS_REPLICATION_CONFIRM_INTERVAL_SECONDS` | Status poll interval |
 | `IPFS_HEALTH_CACHE_TTL_SECONDS` | Write-readiness cache TTL |
 
-Endpoint failover retries a complete request on the second local endpoint.
-Reads do not create pins; persistent allocation and repair remain Cluster's job.
+Kubo, Cluster REST and Cluster Proxy endpoints use round-robin selection. A
+timeout, refused connection, `429` or `5xx` places an endpoint in a 30-second
+cooldown; it rejoins automatically. Store confirms the first `PINNED` peer.
+`GET /v1/status/{cid}` reports total, local, remote and per-site copies plus the
+topology-derived `purge_target_met` decision.
 
 ## Development
 

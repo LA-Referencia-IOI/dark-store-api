@@ -33,9 +33,12 @@ class _FakeResponse:
 class _FakeAsyncClient:
     routes = {}
     calls = []
+    instances = []
 
     def __init__(self, *args, **kwargs):
         del args, kwargs
+        self.closed = False
+        self.instances.append(self)
 
     async def __aenter__(self):
         return self
@@ -43,9 +46,14 @@ class _FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         del exc_type, exc, tb
 
+    async def aclose(self):
+        self.closed = True
+
     async def _call(self, method, url, kwargs):
         self.calls.append((method, url, kwargs))
         result = self.routes[(method, url)]
+        if isinstance(result, list):
+            result = result.pop(0)
         if isinstance(result, Exception):
             raise result
         return result
@@ -68,7 +76,8 @@ class TestFileSystemBackend:
         info = await backend.store(b"content")
         assert await backend.retrieve(info.cid) == b"content"
         status = await backend.status(info.cid)
-        assert status.pinned and status.replicas == 1
+        assert status.status == "pinned"
+        assert status.replication.total_replicas == 1
         assert await backend.health_check()
 
     @pytest.mark.asyncio
@@ -87,9 +96,7 @@ def backend(**overrides):
             "site-a-storage-2": "site-a",
             "site-b-storage-1": "site-b",
         },
-        "expected_cluster_peers": 3,
-        "write_min_peers": 2,
-        "write_min_sites": 2,
+        "local_site_id": "site-a",
         "confirmation_timeout_seconds": 0,
     }
     values.update(overrides)
@@ -101,6 +108,7 @@ class TestIPFSClusterBackend:
     def fake_http(self, monkeypatch):
         _FakeAsyncClient.calls = []
         _FakeAsyncClient.routes = {}
+        _FakeAsyncClient.instances = []
         monkeypatch.setattr("app.backends.ipfs_cluster.httpx.AsyncClient", _FakeAsyncClient)
 
     @pytest.mark.asyncio
@@ -119,16 +127,16 @@ class TestIPFSClusterBackend:
         info = await backend().store(b"data")
 
         assert info.cid == "bafy"
-        assert info.replication.status == "durable"
-        assert info.replication.pinned_peers == 2
-        assert info.replication.pinned_sites == 2
+        assert info.replication.total_replicas == 2
+        assert info.replication.local_replicas == 1
+        assert info.replication.remote_replicas == 1
         assert [call[1] for call in _FakeAsyncClient.calls[:2]] == [
             "http://proxy-a/api/v0/add",
             "http://proxy-b/api/v0/add",
         ]
 
     @pytest.mark.asyncio
-    async def test_store_returns_retryable_error_when_quorum_is_not_observed(self):
+    async def test_store_accepts_the_first_observed_pin(self):
         _FakeAsyncClient.routes = {
             ("POST", "http://proxy-a/api/v0/add"): _FakeResponse(200, {"Hash": "bafy", "Size": "4"}),
             ("GET", "http://cluster-a/pins/bafy"): _FakeResponse(200, {
@@ -138,8 +146,107 @@ class TestIPFSClusterBackend:
             }),
         }
 
-        with pytest.raises(ReplicationQuorumError, match="peers 1/2, sites 1/2"):
-            await backend().store(b"data")
+        info = await backend().store(b"data")
+        assert info.replication.total_replicas == 1
+        assert not info.replication.purge_target_met
+
+    def test_single_site_purge_requires_both_local_pins(self):
+        instance = backend(peer_sites={
+            "site-a-storage-1": "site-a",
+            "site-a-storage-2": "site-a",
+        })
+        assert not instance._snapshot({"site-a": 1}).purge_target_met
+        assert instance._snapshot({"site-a": 2}).purge_target_met
+
+    def test_multisite_purge_requires_two_local_and_one_remote(self):
+        instance = backend()
+        assert not instance._snapshot({"site-a": 2}).purge_target_met
+        assert not instance._snapshot({"site-a": 1, "site-b": 2}).purge_target_met
+        assert instance._snapshot({"site-a": 2, "site-b": 1}).purge_target_met
+
+    def test_replica_count_includes_only_pinned_states(self):
+        instance = backend()
+        sites, statuses = instance._pinned_distribution({
+            "peer_map": {
+                "one": {"peername": "site-a-storage-1", "status": "pinned"},
+                "two": {"peername": "site-a-storage-2", "status": "pinning"},
+                "three": {"peername": "site-b-storage-1", "status": "pin_error"},
+            }
+        })
+        assert sites == {"site-a": 1}
+        assert statuses == {"pinned", "pinning", "pin_error"}
+
+    @pytest.mark.asyncio
+    async def test_store_round_robin_rotates_the_first_proxy(self):
+        pinned = _FakeResponse(200, {
+            "peer_map": {
+                "peer-a": {"peername": "site-a-storage-1", "status": "pinned"},
+            }
+        })
+        _FakeAsyncClient.routes = {
+            ("POST", "http://proxy-a/api/v0/add"): _FakeResponse(200, {"Hash": "bafy-a", "Size": "1"}),
+            ("POST", "http://proxy-b/api/v0/add"): _FakeResponse(200, {"Hash": "bafy-b", "Size": "1"}),
+            ("GET", "http://cluster-a/pins/bafy-a"): pinned,
+            ("GET", "http://cluster-b/pins/bafy-b"): pinned,
+        }
+        instance = backend()
+        await instance.store(b"a")
+        await instance.store(b"b")
+        add_urls = [url for method, url, _ in _FakeAsyncClient.calls if method == "POST" and url.endswith("/add")]
+        assert add_urls == ["http://proxy-a/api/v0/add", "http://proxy-b/api/v0/add"]
+
+    @pytest.mark.asyncio
+    async def test_failed_proxy_cools_down_then_rejoins_round_robin(self, monkeypatch):
+        now = [100.0]
+        monkeypatch.setattr("app.backends.ipfs_cluster.monotonic", lambda: now[0])
+        pinned = lambda name: _FakeResponse(200, {
+            "peer_map": {
+                "peer-a": {"peername": "site-a-storage-1", "status": "pinned"},
+            }
+        })
+        request = httpx.Request("POST", "http://proxy-a/api/v0/add")
+        _FakeAsyncClient.routes = {
+            ("POST", "http://proxy-a/api/v0/add"): [
+                httpx.ConnectError("down", request=request),
+                _FakeResponse(200, {"Hash": "bafy-c", "Size": "1"}),
+            ],
+            ("POST", "http://proxy-b/api/v0/add"): [
+                _FakeResponse(200, {"Hash": "bafy-a", "Size": "1"}),
+                _FakeResponse(200, {"Hash": "bafy-b", "Size": "1"}),
+            ],
+            ("GET", "http://cluster-a/pins/bafy-a"): pinned("a"),
+            ("GET", "http://cluster-b/pins/bafy-b"): pinned("b"),
+            ("GET", "http://cluster-a/pins/bafy-c"): pinned("c"),
+        }
+        instance = backend(endpoint_cooldown_seconds=30)
+
+        await instance.store(b"a")
+        await instance.store(b"b")
+        now[0] += 31
+        await instance.store(b"c")
+
+        add_urls = [url for method, url, _ in _FakeAsyncClient.calls if url.endswith("/add")]
+        assert add_urls == [
+            "http://proxy-a/api/v0/add",
+            "http://proxy-b/api/v0/add",
+            "http://proxy-b/api/v0/add",
+            "http://proxy-a/api/v0/add",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_reuses_and_closes_one_http_client(self):
+        _FakeAsyncClient.routes = {
+            ("POST", "http://ipfs-a/api/v0/cat"): _FakeResponse(200, content=b"payload"),
+            ("POST", "http://ipfs-b/api/v0/cat"): _FakeResponse(200, content=b"payload"),
+        }
+        instance = backend()
+        await instance.retrieve("one")
+        await instance.retrieve("two")
+
+        assert len(_FakeAsyncClient.instances) == 1
+        assert not _FakeAsyncClient.instances[0].closed
+        await instance.close()
+        assert _FakeAsyncClient.instances[0].closed
 
     @pytest.mark.asyncio
     async def test_retrieve_fails_over_to_second_local_kubo(self):
@@ -193,5 +300,5 @@ class TestIPFSClusterBackend:
         }
         instance = backend()
 
-        assert not await instance.write_health_check()
-        assert "cluster sites 1/2" in instance.last_health["error"]
+        assert await instance.write_health_check()
+        assert instance.last_health["available_cluster_sites"] == 1

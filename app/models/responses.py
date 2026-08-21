@@ -3,18 +3,20 @@ Pydantic response models for the store API.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import BaseModel, Field
 
 
 class ReplicationResponse(BaseModel):
-    """Durability evidence observed before a successful store response."""
+    """Current replication distribution and purge readiness."""
 
-    status: str
-    pinned_peers: int
-    pinned_sites: int
-    target_peers: int
+    total_replicas: int
+    local_replicas: int
+    remote_replicas: int
+    sites: Dict[str, int] = Field(default_factory=dict)
+    purge_target_met: bool
+    checked_at: datetime
 
 
 class StoreResponse(BaseModel):
@@ -29,9 +31,8 @@ class StatusResponse(BaseModel):
     """Response from status check."""
 
     cid: str = Field(..., description="Content Identifier")
-    pinned: bool = Field(..., description="Whether content is pinned")
-    replicas: int = Field(..., description="Number of replicas")
     status: str = Field(..., description="Pin status: pinned, pinning, unpinned, error")
+    replication: ReplicationResponse
 
 
 class HealthResponse(BaseModel):
@@ -50,7 +51,6 @@ class HealthResponse(BaseModel):
     cached: bool = Field(default=False, description="Whether this response used cached backend readiness")
     checked_at: Optional[datetime] = Field(default=None, description="When backend readiness was last checked")
     cache_ttl_seconds: Optional[float] = Field(default=None, description="Backend readiness cache TTL")
-    add_mode: Optional[str] = Field(default=None, description="IPFS add mode used by the backend")
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

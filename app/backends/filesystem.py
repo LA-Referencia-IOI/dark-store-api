@@ -6,12 +6,14 @@ Uses MD5 hash as CID (not a real IPFS CID, but useful for local dev).
 
 import hashlib
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .base import (
     StorageBackend,
     ContentInfo,
     PinStatus,
+    ReplicationInfo,
     StorageError,
     ContentNotFoundError,
 )
@@ -75,7 +77,18 @@ class FileSystemBackend(StorageBackend):
 
             logger.info(f"Stored raw content with CID: {cid}")
 
-            return ContentInfo(cid=cid, size=len(content))
+            return ContentInfo(
+                cid=cid,
+                size=len(content),
+                replication=ReplicationInfo(
+                    total_replicas=1,
+                    local_replicas=1,
+                    remote_replicas=0,
+                    sites={"local": 1},
+                    purge_target_met=True,
+                    checked_at=datetime.now(timezone.utc),
+                ),
+            )
 
         except Exception as e:
             logger.error(f"Failed to store content: {e}")
@@ -107,9 +120,15 @@ class FileSystemBackend(StorageBackend):
 
         return PinStatus(
             cid=cid,
-            pinned=True,
-            replicas=1,  # Filesystem has no replication
             status="pinned",
+            replication=ReplicationInfo(
+                total_replicas=1,
+                local_replicas=1,
+                remote_replicas=0,
+                sites={"local": 1},
+                purge_target_met=True,
+                checked_at=datetime.now(timezone.utc),
+            ),
         )
 
     async def health_check(self, refresh: bool = False) -> bool:
