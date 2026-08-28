@@ -13,6 +13,7 @@ from fastapi import FastAPI
 
 from .api.store import router as store_router, health_router
 from .config import get_settings
+from .dependencies import get_storage_backend
 
 
 @asynccontextmanager
@@ -21,8 +22,17 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logger = logging.getLogger(__name__)
     logger.info(f"Starting dark-store-api with backend: {settings.storage_backend}")
-    yield
-    logger.info("Shutting down dark-store-api")
+    backend = get_storage_backend()
+    start = getattr(backend, "start", None)
+    if start is not None:
+        await start()
+    try:
+        yield
+    finally:
+        logger.info("Shutting down dark-store-api")
+        close = getattr(backend, "close", None)
+        if close is not None:
+            await close()
 
 
 def create_app() -> FastAPI:

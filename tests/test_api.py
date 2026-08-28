@@ -25,6 +25,8 @@ class TestStoreEndpoint:
         data = response.json()
         assert "cid" in data
         assert data["size"] > 0
+        assert data["replication"]["total_replicas"] == 1
+        assert data["replication"]["purge_target_met"] is True
 
     def test_store_xml_content(self, client: TestClient):
         """Store XML content."""
@@ -167,9 +169,9 @@ class TestStatusEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["cid"] == cid
-        assert data["pinned"] is True
         assert data["status"] == "pinned"
-        assert data["replicas"] >= 1
+        assert data["replication"]["total_replicas"] == 1
+        assert data["replication"]["purge_target_met"] is True
 
     def test_status_not_found(self, client: TestClient):
         """Status for unknown CID returns 404."""

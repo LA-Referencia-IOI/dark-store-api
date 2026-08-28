@@ -40,13 +40,9 @@ class Settings(BaseSettings):
     ipfs_cluster_proxy_api_urls_json: list[str] = Field(default_factory=list)
     # Maps Cluster peer names (the topology node IDs) to site IDs.
     ipfs_cluster_peer_sites_json: dict[str, str] = Field(default_factory=dict)
-    ipfs_add_mode: str = "cluster_proxy"
+    ipfs_cluster_local_site_id: str = ""
     ipfs_health_cache_ttl_seconds: float = 10.0
-    ipfs_cluster_expected_peers: int = 2
-    ipfs_cluster_write_min_peers: int = 1
-    ipfs_cluster_write_min_sites: int = 1
     ipfs_replication_confirm_timeout_seconds: float = 120.0
-    ipfs_replication_confirm_interval_seconds: float = 2.0
 
     # Filesystem backend (for dev/test only)
     filesystem_storage_path: str = "./storage"

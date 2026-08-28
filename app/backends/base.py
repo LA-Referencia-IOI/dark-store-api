@@ -5,17 +5,20 @@ All storage implementations must implement this interface.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 
 @dataclass
 class ReplicationInfo:
-    """Observed durable replication after a write."""
+    """Observed replication and the topology-derived purge decision."""
 
-    status: str
-    pinned_peers: int
-    pinned_sites: int
-    target_peers: int
+    total_replicas: int
+    local_replicas: int
+    remote_replicas: int
+    sites: dict[str, int] = field(default_factory=dict)
+    purge_target_met: bool = False
+    checked_at: datetime | None = None
 
 
 @dataclass
@@ -29,12 +32,11 @@ class ContentInfo:
 
 @dataclass
 class PinStatus:
-    """Pin/replication status for a CID."""
+    """Pin status and current replication snapshot for a CID."""
 
     cid: str
-    pinned: bool
-    replicas: int
     status: str  # "pinned", "pinning", "unpinned", "error"
+    replication: ReplicationInfo
 
 
 class StorageBackend(ABC):

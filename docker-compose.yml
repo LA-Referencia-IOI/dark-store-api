@@ -6,7 +6,7 @@ services:
   store-api:
     build: *store-api-build
     ports:
-      - "8003:8003"
+      - "${APPS_BIND_ADDRESS:-127.0.0.1}:8003:8003"
     env_file:
       - .env.integration
     healthcheck:

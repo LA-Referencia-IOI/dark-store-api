@@ -136,9 +136,8 @@ async def get_status(
 
         return StatusResponse(
             cid=status.cid,
-            pinned=status.pinned,
-            replicas=status.replicas,
             status=status.status,
+            replication=ReplicationResponse(**vars(status.replication)),
         )
 
     except ContentNotFoundError:
@@ -183,7 +182,6 @@ async def health_check(
         cached=bool(backend_detail.get("cached", False)),
         checked_at=backend_detail.get("checked_at"),
         cache_ttl_seconds=backend_detail.get("cache_ttl_seconds"),
-        add_mode=backend_detail.get("add_mode"),
         timestamp=datetime.now(timezone.utc),
     )
 
