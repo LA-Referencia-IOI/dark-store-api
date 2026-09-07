@@ -6,7 +6,6 @@ Uses Pydantic Settings for environment variable management.
 
 from functools import lru_cache
 from pathlib import Path
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,15 +33,10 @@ class Settings(BaseSettings):
     # Backend selection: "ipfs_cluster" or "filesystem"
     storage_backend: str = "ipfs_cluster"
 
-    # Both site-local storage nodes. Values are JSON arrays in the environment.
-    ipfs_api_urls_json: list[str] = Field(default_factory=list)
-    ipfs_cluster_api_urls_json: list[str] = Field(default_factory=list)
-    ipfs_cluster_proxy_api_urls_json: list[str] = Field(default_factory=list)
-    # Maps Cluster peer names (the topology node IDs) to site IDs.
-    ipfs_cluster_peer_sites_json: dict[str, str] = Field(default_factory=dict)
-    ipfs_cluster_local_site_id: str = ""
+    # Generated endpoint pool, mounted read-only by Compose. The deployer has
+    # already resolved its access group; Store API does not know topology/site.
+    storage_endpoints_file: Path = Path("/config/storage-endpoints.json")
     ipfs_health_cache_ttl_seconds: float = 10.0
-    ipfs_replication_confirm_timeout_seconds: float = 120.0
 
     # Filesystem backend (for dev/test only)
     filesystem_storage_path: str = "./storage"

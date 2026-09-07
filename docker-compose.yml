@@ -9,6 +9,8 @@ services:
       - "${APPS_BIND_ADDRESS:-127.0.0.1}:8003:8003"
     env_file:
       - .env.integration
+    volumes:
+      - ./.storage-endpoints.json:/config/storage-endpoints.json:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health/live')"]
       interval: 30s

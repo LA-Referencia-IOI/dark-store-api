@@ -3,7 +3,7 @@ Pydantic response models for the store API.
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,10 +12,6 @@ class ReplicationResponse(BaseModel):
     """Current replication distribution and purge readiness."""
 
     total_replicas: int
-    local_replicas: int
-    remote_replicas: int
-    sites: Dict[str, int] = Field(default_factory=dict)
-    purge_target_met: bool
     checked_at: datetime
 
 
@@ -43,9 +39,6 @@ class HealthResponse(BaseModel):
     backend_healthy: bool = Field(..., description="Backend health status")
     min_cluster_peers: Optional[int] = Field(default=None, description="Minimum required IPFS Cluster peers")
     available_cluster_peers: Optional[int] = Field(default=None, description="Currently visible IPFS Cluster peers")
-    min_cluster_sites: Optional[int] = Field(default=None, description="Minimum required sites for writes")
-    available_cluster_sites: Optional[int] = Field(default=None, description="Currently visible Cluster sites")
-    expected_cluster_peers: Optional[int] = Field(default=None, description="Peers defined by the global topology")
     dimension: Optional[str] = Field(default=None, description="Health dimension: read or write")
     error: Optional[str] = Field(default=None, description="Backend health error detail when unhealthy")
     cached: bool = Field(default=False, description="Whether this response used cached backend readiness")

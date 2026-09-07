@@ -12,7 +12,6 @@ from fastapi import APIRouter, Depends, Request, Response, HTTPException
 from ..backends.base import (
     StorageBackend,
     ContentNotFoundError,
-    ReplicationQuorumError,
     StorageError,
 )
 from ..config import get_settings
@@ -68,9 +67,6 @@ async def store_content(
             ),
         )
 
-    except ReplicationQuorumError as e:
-        logger.warning("Replication quorum not reached: %s", e)
-        raise HTTPException(status_code=503, detail=str(e), headers={"Retry-After": "5"})
     except StorageError as e:
         logger.error(f"Storage error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -174,9 +170,6 @@ async def health_check(
         backend_healthy=backend_healthy,
         min_cluster_peers=backend_detail.get("min_cluster_peers"),
         available_cluster_peers=backend_detail.get("available_cluster_peers"),
-        min_cluster_sites=backend_detail.get("min_cluster_sites"),
-        available_cluster_sites=backend_detail.get("available_cluster_sites"),
-        expected_cluster_peers=backend_detail.get("expected_cluster_peers"),
         dimension=backend_detail.get("dimension", "write"),
         error=backend_detail.get("error"),
         cached=bool(backend_detail.get("cached", False)),

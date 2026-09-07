@@ -26,7 +26,6 @@ class TestStoreEndpoint:
         assert "cid" in data
         assert data["size"] > 0
         assert data["replication"]["total_replicas"] == 1
-        assert data["replication"]["purge_target_met"] is True
 
     def test_store_xml_content(self, client: TestClient):
         """Store XML content."""
@@ -83,7 +82,7 @@ class TestStoreEndpoint:
 
         assert response1.json()["cid"] == response2.json()["cid"]
 
-    def test_replication_quorum_failure_is_retryable(self):
+    def test_store_does_not_turn_asynchronous_replication_into_a_quorum_gate(self):
         from app.backends.base import ReplicationQuorumError
         from app.dependencies import get_storage_backend
         from app.main import app
@@ -100,8 +99,10 @@ class TestStoreEndpoint:
         finally:
             app.dependency_overrides.clear()
 
-        assert response.status_code == 503
-        assert response.headers["retry-after"] == "5"
+        # Store itself returns a CID after local Cluster acceptance. A backend
+        # failure is still an infrastructure error, but no quorum/retry policy
+        # is exposed at this API boundary.
+        assert response.status_code == 500
 
 
 class TestRetrieveEndpoint:
@@ -171,7 +172,6 @@ class TestStatusEndpoint:
         assert data["cid"] == cid
         assert data["status"] == "pinned"
         assert data["replication"]["total_replicas"] == 1
-        assert data["replication"]["purge_target_met"] is True
 
     def test_status_not_found(self, client: TestClient):
         """Status for unknown CID returns 404."""

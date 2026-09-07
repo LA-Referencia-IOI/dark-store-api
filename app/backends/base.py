@@ -5,7 +5,7 @@ All storage implementations must implement this interface.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 
@@ -14,10 +14,6 @@ class ReplicationInfo:
     """Observed replication and the topology-derived purge decision."""
 
     total_replicas: int
-    local_replicas: int
-    remote_replicas: int
-    sites: dict[str, int] = field(default_factory=dict)
-    purge_target_met: bool = False
     checked_at: datetime | None = None
 
 

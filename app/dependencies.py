@@ -7,6 +7,7 @@ from functools import lru_cache
 from .backends import StorageBackend, FileSystemBackend
 from .backends.ipfs_cluster import IPFSClusterBackend
 from .config import get_settings
+from .topology import load_endpoints
 
 
 @lru_cache
@@ -21,14 +22,11 @@ def get_storage_backend() -> StorageBackend:
     if settings.storage_backend == "filesystem":
         return FileSystemBackend(settings.filesystem_storage_path)
     elif settings.storage_backend == "ipfs_cluster":
+        endpoints = load_endpoints(settings.storage_endpoints_file)
         return IPFSClusterBackend(
-            ipfs_api_urls=settings.ipfs_api_urls_json,
-            cluster_api_urls=settings.ipfs_cluster_api_urls_json,
-            cluster_proxy_api_urls=settings.ipfs_cluster_proxy_api_urls_json,
-            peer_sites=settings.ipfs_cluster_peer_sites_json,
-            local_site_id=settings.ipfs_cluster_local_site_id,
+            ipfs_api_urls=endpoints["ipfs"],
+            cluster_api_urls=endpoints["cluster"],
             health_cache_ttl_seconds=settings.ipfs_health_cache_ttl_seconds,
-            confirmation_timeout_seconds=settings.ipfs_replication_confirm_timeout_seconds,
         )
     else:
         raise ValueError(f"Unknown storage backend: {settings.storage_backend}")

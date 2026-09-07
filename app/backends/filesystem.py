@@ -82,10 +82,6 @@ class FileSystemBackend(StorageBackend):
                 size=len(content),
                 replication=ReplicationInfo(
                     total_replicas=1,
-                    local_replicas=1,
-                    remote_replicas=0,
-                    sites={"local": 1},
-                    purge_target_met=True,
                     checked_at=datetime.now(timezone.utc),
                 ),
             )
@@ -123,10 +119,6 @@ class FileSystemBackend(StorageBackend):
             status="pinned",
             replication=ReplicationInfo(
                 total_replicas=1,
-                local_replicas=1,
-                remote_replicas=0,
-                sites={"local": 1},
-                purge_target_met=True,
                 checked_at=datetime.now(timezone.utc),
             ),
         )
