@@ -33,6 +33,9 @@ class StatusResponse(BaseModel):
     cid: str = Field(..., description="Content Identifier")
     status: str = Field(..., description="Pin status: pinned, pinning, queued, unpinned, error, unknown")
     replication: ReplicationResponse
+    # Batch observation is deliberately partial: an unavailable CID must not
+    # turn an otherwise useful page into a global 503.
+    error: Optional[str] = None
 
 
 class BatchStatusRequest(BaseModel):

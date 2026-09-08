@@ -27,6 +27,9 @@ def get_storage_backend() -> StorageBackend:
             ipfs_api_urls=endpoints["ipfs"],
             cluster_api_urls=endpoints["cluster"],
             health_cache_ttl_seconds=settings.ipfs_health_cache_ttl_seconds,
+            add_concurrency=settings.store_add_concurrency,
+            status_concurrency=settings.store_status_concurrency,
+            promotion_concurrency=settings.store_promotion_concurrency,
         )
     else:
         raise ValueError(f"Unknown storage backend: {settings.storage_backend}")

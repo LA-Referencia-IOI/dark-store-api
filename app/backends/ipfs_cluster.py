@@ -64,6 +64,9 @@ class IPFSClusterBackend(StorageBackend):
         timeout: float = 30.0,
         health_cache_ttl_seconds: float = 10.0,
         endpoint_cooldown_seconds: float = 30.0,
+        add_concurrency: int = 4,
+        status_concurrency: int = 6,
+        promotion_concurrency: int = 1,
     ):
         self.ipfs_api_urls = self._urls(
             ipfs_api_urls, "storage topology Kubo endpoints"
@@ -81,6 +84,9 @@ class IPFSClusterBackend(StorageBackend):
         self._cluster_pool = _EndpointPool(
             self.cluster_api_urls, endpoint_cooldown_seconds
         )
+        self._add_slots = asyncio.Semaphore(max(1, int(add_concurrency)))
+        self._status_slots = asyncio.Semaphore(max(1, int(status_concurrency)))
+        self._promotion_slots = asyncio.Semaphore(max(1, int(promotion_concurrency)))
 
     @staticmethod
     def _urls(values: list[str], setting: str) -> list[str]:
@@ -112,6 +118,10 @@ class IPFSClusterBackend(StorageBackend):
 
     async def store(self, content: bytes) -> ContentInfo:
         """Accept content through a local Cluster REST API without waiting for replication."""
+        async with self._add_slots:
+            return await self._store_with_slot(content)
+
+    async def _store_with_slot(self, content: bytes) -> ContentInfo:
         failures: list[str] = []
         info: ContentInfo | None = None
         client = await self._http()
@@ -155,6 +165,10 @@ class IPFSClusterBackend(StorageBackend):
 
     async def ensure_replication(self, cids: list[str], target_replicas: int) -> dict[str, str]:
         """Increase existing pin allocations without re-uploading payloads."""
+        async with self._promotion_slots:
+            return await self._ensure_replication_with_slot(cids, target_replicas)
+
+    async def _ensure_replication_with_slot(self, cids: list[str], target_replicas: int) -> dict[str, str]:
         if target_replicas < 1:
             raise StorageError("target_replicas must be at least 1")
         results: dict[str, str] = {}
@@ -234,6 +248,10 @@ class IPFSClusterBackend(StorageBackend):
         return None
 
     async def _global_status(self, cid: str) -> dict[str, Any]:
+        async with self._status_slots:
+            return await self._global_status_with_slot(cid)
+
+    async def _global_status_with_slot(self, cid: str) -> dict[str, Any]:
         failures: list[str] = []
         not_found = 0
         client = await self._http()

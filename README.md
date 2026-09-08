@@ -12,7 +12,7 @@ another.
 | `POST` | `/v1/store` | Add through Cluster REST and return the CID immediately |
 | `GET` | `/v1/retrieve/{cid}` | Read through either local Kubo |
 | `GET` | `/v1/status/{cid}` | Observe global pin status |
-| `POST` | `/v1/status/batch` | Observe hasta 200 CIDs con concurrencia acotada |
+| `POST` | `/v1/status/batch` | Observe up to 200 CIDs; a timeout is returned per CID, not as a global failure |
 | `GET` | `/health/live` | Process liveness only |
 | `GET` | `/health/read` | At least one local Kubo is usable |
 | `GET` | `/health/write` | At least one local write path and one known Cluster peer are usable |

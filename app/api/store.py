@@ -183,7 +183,7 @@ async def get_status_batch(
     """Observe CIDs concurrently without making callers open one request per CID."""
     import asyncio
 
-    semaphore = asyncio.Semaphore(10)
+    semaphore = asyncio.Semaphore(get_settings().store_status_concurrency)
 
     async def observe(cid: str) -> StatusResponse:
         try:
@@ -200,13 +200,17 @@ async def get_status_batch(
                 status="unpinned",
                 replication=ReplicationResponse(total_replicas=0, checked_at=datetime.now(timezone.utc)),
             )
+        except StorageError as exc:
+            logger.warning("CID status observation deferred cid=%s: %s", cid, exc)
+            return StatusResponse(
+                cid=cid,
+                status="unknown",
+                replication=ReplicationResponse(total_replicas=0, checked_at=datetime.now(timezone.utc)),
+                error=str(exc),
+            )
 
-    try:
-        statuses = await asyncio.gather(*(observe(cid) for cid in payload.cids))
-        return BatchStatusResponse(statuses=statuses)
-    except StorageError as exc:
-        logger.error("Batch status error: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+    statuses = await asyncio.gather(*(observe(cid) for cid in payload.cids))
+    return BatchStatusResponse(statuses=statuses)
 
 
 @health_router.get(
