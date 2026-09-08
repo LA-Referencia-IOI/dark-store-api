@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     # already resolved its access group; Store API does not know topology/site.
     storage_endpoints_file: Path = Path("/config/storage-endpoints.json")
     ipfs_health_cache_ttl_seconds: float = 10.0
+    replication_target_replicas: int = 2
 
     # Filesystem backend (for dev/test only)
     filesystem_storage_path: str = "./storage"

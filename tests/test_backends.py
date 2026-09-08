@@ -15,6 +15,7 @@ class _FakeResponse:
     def __init__(self, status_code=200, payload=None, text=None, content=None):
         self.status_code = status_code
         self._payload = payload
+        self.headers = {"content-type": "application/json"}
         self.text = (
             text
             if text is not None
@@ -139,6 +140,22 @@ class TestIPFSClusterBackend:
 
         info = await backend().store(b"data")
         assert info.replication is None
+        add_call = next(call for call in _FakeAsyncClient.calls if call[1].endswith("/add"))
+        assert add_call[2]["params"]["replication-min"] == 1
+        assert add_call[2]["params"]["replication-max"] == 1
+
+    @pytest.mark.asyncio
+    async def test_ensure_replication_promotes_without_uploading(self):
+        _FakeAsyncClient.routes = {
+            ("POST", "http://cluster-a/pins/bafy"): _FakeResponse(200, {"cid": "bafy"}),
+        }
+        result = await backend().ensure_replication(["bafy"], 2)
+        assert result == {"bafy": "promotion_requested"}
+        assert len(_FakeAsyncClient.calls) == 1
+        assert _FakeAsyncClient.calls[0][2]["params"] == {
+            "replication-min": 1,
+            "replication-max": 2,
+        }
 
     @pytest.mark.asyncio
     async def test_store_accepts_cluster_rest_lowercase_cid_response(self):
@@ -284,6 +301,27 @@ class TestIPFSClusterBackend:
         assert instance.last_health["available_cluster_peers"] == 2
 
     @pytest.mark.asyncio
+    async def test_write_health_fails_over_from_slow_cluster_peer(self):
+        _FakeAsyncClient.routes = {
+            ("POST", "http://ipfs-a/api/v0/id"): _FakeResponse(200, {"ID": "kubo"}),
+            ("GET", "http://cluster-a/peers"): httpx.ReadTimeout("slow peer"),
+            ("GET", "http://cluster-b/peers"): _FakeResponse(
+                200, [{"id": "peer-b", "peername": "storage-b"}]
+            ),
+        }
+        instance = backend()
+
+        assert await instance.write_health_check()
+        cluster_calls = [
+            call for call in _FakeAsyncClient.calls if call[1].endswith("/peers")
+        ]
+        assert [call[1] for call in cluster_calls] == [
+            "http://cluster-a/peers",
+            "http://cluster-b/peers",
+        ]
+        assert all(call[2]["timeout"] <= 2.0 for call in cluster_calls)
+
+    @pytest.mark.asyncio
     async def test_write_health_accepts_peers_without_site_labels(self):
         _FakeAsyncClient.routes = {
             ("POST", "http://ipfs-a/api/v0/id"): _FakeResponse(200),
@@ -299,3 +337,14 @@ class TestIPFSClusterBackend:
 
         assert await instance.write_health_check()
         assert instance.last_health["available_cluster_peers"] == 2
+
+    @pytest.mark.asyncio
+    async def test_store_accepts_cluster_cid_json_object(self):
+        _FakeAsyncClient.routes = {
+            ("POST", "http://cluster-a/add"): _FakeResponse(
+                200, {"cid": {"/": "bafy-cluster-cid"}, "size": 7}
+            ),
+        }
+        info = await backend().store(b"content")
+        assert info.cid == "bafy-cluster-cid"
+        assert info.size == 7

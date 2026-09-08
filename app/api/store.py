@@ -6,6 +6,7 @@ Provides store, retrieve, status, and health operations.
 
 import logging
 from datetime import datetime, timezone
+from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, Depends, Request, Response, HTTPException
 
@@ -17,6 +18,8 @@ from ..backends.base import (
 from ..config import get_settings
 from ..dependencies import get_storage_backend
 from ..models.responses import (
+    BatchStatusRequest,
+    BatchStatusResponse,
     ErrorResponse,
     HealthResponse,
     ReplicationResponse,
@@ -29,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["storage"])
 health_router = APIRouter(tags=["health"])
+
+
+class ReplicationEnsureRequest(BaseModel):
+    cids: list[str] = Field(..., min_length=1, max_length=200)
+    target_replicas: int = Field(..., ge=1, le=200)
 
 
 @router.post(
@@ -70,6 +78,25 @@ async def store_content(
     except StorageError as e:
         logger.error(f"Storage error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/replication/ensure", summary="Request durable replication")
+async def ensure_replication(
+    request: ReplicationEnsureRequest,
+    backend: StorageBackend = Depends(get_storage_backend),
+) -> dict[str, dict[str, str]]:
+    """Request higher allocations for existing CIDs without waiting for pins."""
+    try:
+        configured_target = get_settings().replication_target_replicas
+        if request.target_replicas > configured_target:
+            raise HTTPException(
+                status_code=422,
+                detail=f"target_replicas cannot exceed configured target {configured_target}",
+            )
+        return {"results": await backend.ensure_replication(request.cids, request.target_replicas)}
+    except StorageError as exc:
+        logger.error("Replication promotion failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get(
@@ -143,6 +170,45 @@ async def get_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post(
+    "/status/batch",
+    response_model=BatchStatusResponse,
+    responses={500: {"model": ErrorResponse}},
+    summary="Get pin status for a bounded CID batch",
+)
+async def get_status_batch(
+    payload: BatchStatusRequest,
+    backend: StorageBackend = Depends(get_storage_backend),
+) -> BatchStatusResponse:
+    """Observe CIDs concurrently without making callers open one request per CID."""
+    import asyncio
+
+    semaphore = asyncio.Semaphore(10)
+
+    async def observe(cid: str) -> StatusResponse:
+        try:
+            async with semaphore:
+                status = await backend.status(cid)
+            return StatusResponse(
+                cid=status.cid,
+                status=status.status,
+                replication=ReplicationResponse(**vars(status.replication)),
+            )
+        except ContentNotFoundError:
+            return StatusResponse(
+                cid=cid,
+                status="unpinned",
+                replication=ReplicationResponse(total_replicas=0, checked_at=datetime.now(timezone.utc)),
+            )
+
+    try:
+        statuses = await asyncio.gather(*(observe(cid) for cid in payload.cids))
+        return BatchStatusResponse(statuses=statuses)
+    except StorageError as exc:
+        logger.error("Batch status error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @health_router.get(
     "/health",
     response_model=HealthResponse,
@@ -170,6 +236,7 @@ async def health_check(
         backend_healthy=backend_healthy,
         min_cluster_peers=backend_detail.get("min_cluster_peers"),
         available_cluster_peers=backend_detail.get("available_cluster_peers"),
+        duplicate_ipfs_peer_ids=backend_detail.get("duplicate_ipfs_peer_ids"),
         dimension=backend_detail.get("dimension", "write"),
         error=backend_detail.get("error"),
         cached=bool(backend_detail.get("cached", False)),

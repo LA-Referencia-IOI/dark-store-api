@@ -11,9 +11,18 @@ from datetime import datetime
 
 @dataclass
 class ReplicationInfo:
-    """Observed replication and the topology-derived purge decision."""
+    """Observed Cluster assignment states for a CID.
+
+    Only ``confirmed_replicas`` represents a durable, usable copy.  Queue and
+    pinning counts are intentionally exposed separately: they are normal
+    asynchronous Cluster states, not missing content.
+    """
 
     total_replicas: int
+    queued_replicas: int = 0
+    pinning_replicas: int = 0
+    error_replicas: int = 0
+    assigned_replicas: int = 0
     checked_at: datetime | None = None
 
 
@@ -31,7 +40,7 @@ class PinStatus:
     """Pin status and current replication snapshot for a CID."""
 
     cid: str
-    status: str  # "pinned", "pinning", "unpinned", "error"
+    status: str  # "pinned", "pinning", "queued", "unpinned", "error", "unknown"
     replication: ReplicationInfo
 
 
@@ -84,6 +93,15 @@ class StorageBackend(ABC):
 
         Raises:
             ContentNotFoundError: If CID not found
+        """
+        pass
+
+    @abstractmethod
+    async def ensure_replication(self, cids: list[str], target_replicas: int) -> dict[str, str]:
+        """Raise the allocation target for already stored CIDs.
+
+        This operation changes Cluster pin allocations only; it must not upload
+        content again or wait for the resulting pins to finish.
         """
         pass
 
