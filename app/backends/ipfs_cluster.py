@@ -178,9 +178,16 @@ class IPFSClusterBackend(StorageBackend):
             promoted = False
             for base_url in await self._cluster_pool.ordered():
                 try:
+                    # ``replication-max`` is only an upper bound.  Keeping
+                    # the old ``1/target`` range permits Cluster to retain a
+                    # single existing allocation forever.  Maintenance must
+                    # require the configured target on both bounds.
                     response = await client.post(
                         f"{base_url}/pins/{cid}",
-                        params={"replication-min": 1, "replication-max": target_replicas},
+                        params={
+                            "replication-min": target_replicas,
+                            "replication-max": target_replicas,
+                        },
                     )
                     if self._retryable_status(response.status_code):
                         await self._cluster_pool.failed(base_url)

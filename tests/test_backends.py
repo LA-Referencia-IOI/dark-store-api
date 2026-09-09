@@ -153,7 +153,7 @@ class TestIPFSClusterBackend:
         assert result == {"bafy": "promotion_requested"}
         assert len(_FakeAsyncClient.calls) == 1
         assert _FakeAsyncClient.calls[0][2]["params"] == {
-            "replication-min": 1,
+            "replication-min": 2,
             "replication-max": 2,
         }
 
