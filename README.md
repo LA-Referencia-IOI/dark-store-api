@@ -87,5 +87,12 @@ payload purge.
 
 The initial add explicitly requests `replication-min=1` and
 `replication-max=1`. The internal `POST /v1/replication/ensure` operation can
-later raise an existing pin to the configured target without uploading the
-payload again. It is intended for the minter's idle durability phase.
+raise an existing pin to the configured target without uploading the payload
+again. Its bounded
+response is independent per CID: `promotion_requested`, `already_allocated`,
+or `promotion_failed`. Callers may include the assignment counts from the
+immediately preceding status batch so Store API can avoid both a redundant
+Cluster lookup and a redundant promotion; partial failures never discard the
+successful CID results.
+
+It is intended for the minter's idle durability phase.

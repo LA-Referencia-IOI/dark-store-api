@@ -173,7 +173,7 @@ class TestIPFSClusterBackend:
 
     def test_replica_count_includes_only_pinned_states(self):
         instance = backend()
-        total, statuses = instance._pinned_distribution(
+        replication, statuses = instance._pinned_distribution(
             {
                 "peer_map": {
                     "one": {"peername": "site-a-storage-1", "status": "pinned"},
@@ -182,7 +182,10 @@ class TestIPFSClusterBackend:
                 }
             }
         )
-        assert total == 1
+        assert replication.total_replicas == 1
+        assert replication.pinning_replicas == 1
+        assert replication.error_replicas == 1
+        assert replication.assigned_replicas == 3
         assert statuses == {"pinned", "pinning", "pin_error"}
 
     @pytest.mark.asyncio

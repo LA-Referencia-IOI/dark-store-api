@@ -86,7 +86,8 @@ class IPFSClusterBackend(StorageBackend):
         )
         self._add_slots = asyncio.Semaphore(max(1, int(add_concurrency)))
         self._status_slots = asyncio.Semaphore(max(1, int(status_concurrency)))
-        self._promotion_slots = asyncio.Semaphore(max(1, int(promotion_concurrency)))
+        self.promotion_concurrency = max(1, int(promotion_concurrency))
+        self._promotion_slots = asyncio.Semaphore(1)
 
     @staticmethod
     def _urls(values: list[str], setting: str) -> list[str]:
@@ -171,42 +172,49 @@ class IPFSClusterBackend(StorageBackend):
     async def _ensure_replication_with_slot(self, cids: list[str], target_replicas: int) -> dict[str, str]:
         if target_replicas < 1:
             raise StorageError("target_replicas must be at least 1")
-        results: dict[str, str] = {}
+        unique_cids = list(dict.fromkeys(cids))
         client = await self._http()
-        for cid in dict.fromkeys(cids):
-            failures: list[str] = []
-            promoted = False
-            for base_url in await self._cluster_pool.ordered():
-                try:
-                    # ``replication-max`` is only an upper bound.  Keeping
-                    # the old ``1/target`` range permits Cluster to retain a
-                    # single existing allocation forever.  Maintenance must
-                    # require the configured target on both bounds.
-                    response = await client.post(
-                        f"{base_url}/pins/{cid}",
-                        params={
-                            "replication-min": target_replicas,
-                            "replication-max": target_replicas,
-                        },
-                    )
-                    if self._retryable_status(response.status_code):
-                        await self._cluster_pool.failed(base_url)
-                        failures.append(f"{base_url}: HTTP {response.status_code}")
-                        continue
-                    response.raise_for_status()
-                    await self._cluster_pool.succeeded(base_url)
-                    promoted = True
-                    break
-                except httpx.RequestError as exc:
+        cid_slots = asyncio.Semaphore(max(1, int(self.promotion_concurrency)))
+
+        async def promote(cid: str) -> tuple[str, str]:
+            async with cid_slots:
+                return await self._promote_cid(client, cid, target_replicas)
+
+        pairs = await asyncio.gather(*(promote(cid) for cid in unique_cids))
+        return dict(pairs)
+
+    async def _promote_cid(
+        self, client: httpx.AsyncClient, cid: str, target_replicas: int
+    ) -> tuple[str, str]:
+        """Request one CID promotion, preserving per-CID failover semantics."""
+        failures: list[str] = []
+        promoted = False
+        for base_url in await self._cluster_pool.ordered():
+            try:
+                response = await client.post(
+                    f"{base_url}/pins/{cid}",
+                    params={
+                        "replication-min": target_replicas,
+                        "replication-max": target_replicas,
+                    },
+                )
+                if self._retryable_status(response.status_code):
                     await self._cluster_pool.failed(base_url)
-                    failures.append(f"{base_url}: {exc}")
-                except httpx.HTTPStatusError as exc:
-                    failures.append(f"{base_url}: HTTP {exc.response.status_code}")
-            if promoted:
-                results[cid] = "promotion_requested"
-            else:
-                results[cid] = "promotion_failed: " + "; ".join(failures)
-        return results
+                    failures.append(f"{base_url}: HTTP {response.status_code}")
+                    continue
+                response.raise_for_status()
+                await self._cluster_pool.succeeded(base_url)
+                promoted = True
+                break
+            except httpx.RequestError as exc:
+                await self._cluster_pool.failed(base_url)
+                failures.append(f"{base_url}: {exc}")
+            except httpx.HTTPStatusError as exc:
+                failures.append(f"{base_url}: HTTP {exc.response.status_code}")
+        if promoted:
+            return cid, "promotion_requested"
+        logger.warning("CID promotion failed cid=%s failures=%s", cid, "; ".join(failures))
+        return cid, "promotion_failed"
 
     def _parse_ipfs_add_response(
         self, response: httpx.Response, fallback_size: int

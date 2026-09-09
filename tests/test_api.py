@@ -151,6 +151,38 @@ class TestRetrieveEndpoint:
         assert response.status_code == 404
 
 
+class TestReplicationEnsureEndpoint:
+    def test_skips_cids_already_allocated_and_preserves_partial_results(self):
+        from app.dependencies import get_storage_backend
+        from app.main import app
+
+        class Backend:
+            calls = []
+
+            async def ensure_replication(self, cids, target_replicas):
+                self.calls.append((cids, target_replicas))
+                return {cid: "promotion_failed" for cid in cids}
+
+        backend = Backend()
+        app.dependency_overrides[get_storage_backend] = lambda: backend
+        try:
+            with TestClient(app) as test_client:
+                response = test_client.post("/v1/replication/ensure", json={
+                    "cids": ["allocated", "underallocated"],
+                    "target_replicas": 2,
+                    "assigned_replicas": {"allocated": 2, "underallocated": 1},
+                })
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert response.json()["results"] == {
+            "allocated": "already_allocated",
+            "underallocated": "promotion_failed",
+        }
+        assert backend.calls == [(["underallocated"], 2)]
+
+
 class TestStatusEndpoint:
     """Tests for GET /v1/status/{cid}."""
 

@@ -37,6 +37,7 @@ health_router = APIRouter(tags=["health"])
 class ReplicationEnsureRequest(BaseModel):
     cids: list[str] = Field(..., min_length=1, max_length=200)
     target_replicas: int = Field(..., ge=1, le=200)
+    assigned_replicas: dict[str, int] = Field(default_factory=dict)
 
 
 @router.post(
@@ -93,7 +94,14 @@ async def ensure_replication(
                 status_code=422,
                 detail=f"target_replicas cannot exceed configured target {configured_target}",
             )
-        return {"results": await backend.ensure_replication(request.cids, request.target_replicas)}
+        already_allocated = {
+            cid: "already_allocated"
+            for cid in request.cids
+            if int(request.assigned_replicas.get(cid, -1)) >= request.target_replicas
+        }
+        pending = [cid for cid in request.cids if cid not in already_allocated]
+        promoted = await backend.ensure_replication(pending, request.target_replicas) if pending else {}
+        return {"results": {**already_allocated, **promoted}}
     except StorageError as exc:
         logger.error("Replication promotion failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     replication_target_replicas: int = 2
     store_add_concurrency: int = 4
     store_status_concurrency: int = 6
-    store_promotion_concurrency: int = 1
+    store_promotion_concurrency: int = 4
 
     # Filesystem backend (for dev/test only)
     filesystem_storage_path: str = "./storage"

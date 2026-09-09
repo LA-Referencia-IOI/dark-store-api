@@ -125,7 +125,7 @@ class FileSystemBackend(StorageBackend):
 
     async def ensure_replication(self, cids: list[str], target_replicas: int) -> dict[str, str]:
         """The test filesystem is already durable at its single replica."""
-        return {cid: "already_durable" for cid in cids}
+        return {cid: "already_allocated" for cid in cids}
 
     async def health_check(self, refresh: bool = False) -> bool:
         """Check if storage directory is accessible."""
