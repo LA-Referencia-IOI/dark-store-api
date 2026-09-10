@@ -6,9 +6,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-COPY services/dark-store-api/pyproject.toml ./
-COPY services/dark-store-api/README.md ./
-COPY services/dark-store-api/app ./app/
+COPY dark-store-api/pyproject.toml ./
+COPY dark-store-api/README.md ./
+COPY dark-store-api/app ./app/
 
 RUN pip install --no-cache-dir .
 
