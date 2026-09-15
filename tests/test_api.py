@@ -183,6 +183,71 @@ class TestReplicationEnsureEndpoint:
         assert backend.calls == [(["underallocated"], 2)]
 
 
+class TestReadOnlyMode:
+    def test_read_only_rejects_mutations_before_reaching_backend(self, monkeypatch):
+        from app.config import get_settings
+        from app.dependencies import get_storage_backend
+        from app.main import app
+
+        class Backend:
+            async def store(self, content):
+                raise AssertionError("read-only requests must not call backend.store")
+
+            async def ensure_replication(self, cids, target_replicas):
+                raise AssertionError("read-only requests must not call backend.ensure_replication")
+
+        monkeypatch.setenv("STORE_API_MODE", "read_only")
+        get_settings.cache_clear()
+        get_storage_backend.cache_clear()
+        app.dependency_overrides[get_storage_backend] = Backend
+        try:
+            with TestClient(app) as test_client:
+                store = test_client.post("/v1/store", content=b"payload")
+                promote = test_client.post("/v1/replication/ensure", json={
+                    "cids": ["bafy-test"], "target_replicas": 1,
+                })
+        finally:
+            app.dependency_overrides.clear()
+            get_storage_backend.cache_clear()
+            get_settings.cache_clear()
+
+        assert store.status_code == 403
+        assert promote.status_code == 403
+        assert "read_only" in store.json()["detail"]
+
+    def test_read_only_health_uses_the_read_probe(self, monkeypatch):
+        from app.config import get_settings
+        from app.dependencies import get_storage_backend
+        from app.main import app
+
+        class Backend:
+            last_health = {"dimension": "read", "error": None}
+
+            async def read_health_check(self):
+                return True
+
+            async def write_health_check(self, refresh=False):
+                raise AssertionError("read-only health must not call the write probe")
+
+        monkeypatch.setenv("STORE_API_MODE", "read_only")
+        get_settings.cache_clear()
+        get_storage_backend.cache_clear()
+        app.dependency_overrides[get_storage_backend] = Backend
+        try:
+            with TestClient(app) as test_client:
+                health = test_client.get("/health")
+                write = test_client.get("/health/write")
+        finally:
+            app.dependency_overrides.clear()
+            get_storage_backend.cache_clear()
+            get_settings.cache_clear()
+
+        assert health.status_code == 200
+        assert health.json()["dimension"] == "read"
+        assert write.status_code == 503
+        assert write.json()["dimension"] == "write"
+
+
 class TestStatusEndpoint:
     """Tests for GET /v1/status/{cid}."""
 

@@ -16,7 +16,7 @@ another.
 | `GET` | `/health/live` | Process liveness only |
 | `GET` | `/health/read` | At least one local Kubo is usable |
 | `GET` | `/health/write` | At least one local write path and one known Cluster peer are usable |
-| `GET` | `/health` | Alias of write readiness |
+| `GET` | `/health` | Write readiness normally; read readiness in `read_only` mode |
 
 A successful write returns the accepted CID; it does not imply a pin has been
 observed yet:
@@ -44,6 +44,7 @@ full topology: only its Kubo and Cluster REST failover endpoints.
 | --- | --- |
 | `STORAGE_ENDPOINTS_FILE` | Mounted generated endpoint document inside the container |
 | `IPFS_HEALTH_CACHE_TTL_SECONDS` | Write-readiness cache TTL |
+| `STORE_API_MODE` | `read_write` (default) or `read_only`; a reader rejects publication and pin-allocation changes |
 
 Kubo and Cluster REST endpoints use round-robin selection. A
 timeout, refused connection, `429` or `5xx` places an endpoint in a 30-second
@@ -60,6 +61,18 @@ normal asynchronous progress, while `error` is a real Cluster error.
 `assigned_replicas` counts all peer assignments. Store API reports health as
 failed when multiple visible Cluster peers advertise the same Kubo peer
 identity, because that would make HA replica counts misleading.
+
+## Read-only Store API
+
+Set `STORE_API_MODE=read_only` for a Store API placed next to a Resolver. It
+retrieves existing content through its site-local Kubo endpoints but rejects
+`POST /v1/store` and `POST /v1/replication/ensure` with `403` before either
+operation reaches the storage backend.
+
+In this mode `GET /health` is a read-readiness check, equivalent to
+`GET /health/read`. `GET /health/write` returns `503`, because writing is
+deliberately disabled. This is an API-level boundary: private networking or a
+proxy route are not relied on to protect mutating operations.
 
 ## Development
 

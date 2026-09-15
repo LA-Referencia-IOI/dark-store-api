@@ -6,6 +6,7 @@ Uses Pydantic Settings for environment variable management.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +33,10 @@ class Settings(BaseSettings):
 
     # Backend selection: "ipfs_cluster" or "filesystem"
     storage_backend: str = "ipfs_cluster"
+
+    # A reader serves existing content through local Kubo endpoints but must
+    # never publish content or alter Cluster pin allocations.
+    store_api_mode: Literal["read_write", "read_only"] = "read_write"
 
     # Generated endpoint pool, mounted read-only by Compose. The deployer has
     # already resolved its access group; Store API does not know topology/site.

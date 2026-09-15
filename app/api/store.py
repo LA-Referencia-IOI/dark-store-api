@@ -40,6 +40,15 @@ class ReplicationEnsureRequest(BaseModel):
     assigned_replicas: dict[str, int] = Field(default_factory=dict)
 
 
+def require_write_access() -> None:
+    """Reject mutations before a storage backend can be reached."""
+    if get_settings().store_api_mode == "read_only":
+        raise HTTPException(
+            status_code=403,
+            detail="Store API is configured in read_only mode; write operations are disabled",
+        )
+
+
 @router.post(
     "/store",
     response_model=StoreResponse,
@@ -49,6 +58,7 @@ class ReplicationEnsureRequest(BaseModel):
 )
 async def store_content(
     request: Request,
+    _: None = Depends(require_write_access),
     backend: StorageBackend = Depends(get_storage_backend),
 ) -> StoreResponse:
     """
@@ -84,6 +94,7 @@ async def store_content(
 @router.post("/replication/ensure", summary="Request durable replication")
 async def ensure_replication(
     request: ReplicationEnsureRequest,
+    _: None = Depends(require_write_access),
     backend: StorageBackend = Depends(get_storage_backend),
 ) -> dict[str, dict[str, str]]:
     """Request higher allocations for existing CIDs without waiting for pins."""
@@ -236,8 +247,12 @@ async def health_check(
     Check API and storage backend health.
     """
     settings = get_settings()
-    write_check = getattr(backend, "write_health_check", None) or backend.health_check
-    backend_healthy = await write_check(refresh=refresh)
+    if settings.store_api_mode == "read_only":
+        read_check = getattr(backend, "read_health_check", None) or backend.health_check
+        backend_healthy = await read_check()
+    else:
+        write_check = getattr(backend, "write_health_check", None) or backend.health_check
+        backend_healthy = await write_check(refresh=refresh)
     if not backend_healthy:
         response.status_code = 503
     backend_detail = getattr(backend, "last_health", {}) or {}
@@ -295,6 +310,17 @@ async def write_health_check(
     refresh: bool = False,
     backend: StorageBackend = Depends(get_storage_backend),
 ) -> HealthResponse:
+    settings = get_settings()
+    if settings.store_api_mode == "read_only":
+        response.status_code = 503
+        return HealthResponse(
+            status="unhealthy",
+            backend=settings.storage_backend,
+            backend_healthy=False,
+            dimension="write",
+            error="write capability is disabled in read_only mode",
+            timestamp=datetime.now(timezone.utc),
+        )
     return await health_check(response=response, refresh=refresh, backend=backend)
 
 
