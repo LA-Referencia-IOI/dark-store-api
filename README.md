@@ -13,6 +13,7 @@ another.
 | `GET` | `/v1/retrieve/{cid}` | Read through either local Kubo |
 | `GET` | `/v1/status/{cid}` | Observe global pin status |
 | `POST` | `/v1/status/batch` | Observe up to 200 CIDs; a timeout is returned per CID, not as a global failure |
+| `POST` | `/v1/replication/ensure` | Raise already stored pins to a higher replica target without re-uploading; one verdict per CID |
 | `GET` | `/health/live` | Process liveness only |
 | `GET` | `/health/read` | At least one local Kubo is usable |
 | `GET` | `/health/write` | At least one local write path and one known Cluster peer are usable |
@@ -44,6 +45,7 @@ full topology: only its Kubo and Cluster REST failover endpoints.
 | --- | --- |
 | `STORAGE_ENDPOINTS_FILE` | Mounted generated endpoint document inside the container |
 | `IPFS_HEALTH_CACHE_TTL_SECONDS` | Write-readiness cache TTL |
+| `REPLICATION_TARGET_REPLICAS` | Replica target `POST /v1/replication/ensure` may request (default 2); a higher `target_replicas` is refused with `422` |
 | `STORE_API_MODE` | `read_write` (default) or `read_only`; a reader rejects publication and pin-allocation changes |
 
 Kubo and Cluster REST endpoints use round-robin selection. A
@@ -107,5 +109,25 @@ or `promotion_failed`. Callers may include the assignment counts from the
 immediately preceding status batch so Store API can avoid both a redundant
 Cluster lookup and a redundant promotion; partial failures never discard the
 successful CID results.
+
+The request accepts 1–200 CIDs and a `target_replicas` between 1 and 200:
+
+```json
+{
+  "cids": ["bafy..."],
+  "target_replicas": 2,
+  "assigned_replicas": {"bafy...": 1}
+}
+```
+
+`assigned_replicas` is optional: a CID whose supplied count already meets
+`target_replicas` is answered `already_allocated` without a Cluster call. The
+rest are promoted by raising the pin's `replication-min`/`replication-max` to
+`target_replicas` through Cluster REST — an allocation change only, never a
+re-upload — and the reply is `{"results": {<cid>: <verdict>}}` without waiting
+for the new pins to report `pinned`. A `target_replicas` above the configured
+`REPLICATION_TARGET_REPLICAS` (default 2) is refused with `422`; in
+`read_only` mode the endpoint answers `403` before any storage call, and a
+backend failure returns `500`.
 
 It is intended for the minter's idle durability phase.
