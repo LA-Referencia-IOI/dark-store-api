@@ -7,6 +7,7 @@ Uses Pydantic Settings for environment variable management.
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -55,7 +56,19 @@ class Settings(BaseSettings):
     store_api_port: int = 8003
 
     # Logging
-    log_level: str = "INFO"
+    # Production-safe default: keep warnings and errors while suppressing
+    # per-request and per-publication INFO messages. Use LOG_LEVEL=DEBUG for
+    # detailed diagnostics.
+    log_level: str = "WARNING"
+
+    @field_validator("log_level")
+    @classmethod
+    def validate_log_level(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        allowed_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if normalized not in allowed_levels:
+            raise ValueError("LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+        return normalized
 
     @property
     def api_host(self) -> str:

@@ -74,6 +74,7 @@ def run():
         host=settings.api_host,
         port=settings.api_port,
         reload=False,
+        log_level=settings.log_level.lower(),
     )
 
 

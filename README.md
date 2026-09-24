@@ -47,6 +47,7 @@ full topology: only its Kubo and Cluster REST failover endpoints.
 | `IPFS_HEALTH_CACHE_TTL_SECONDS` | Write-readiness cache TTL |
 | `REPLICATION_TARGET_REPLICAS` | Replica target `POST /v1/replication/ensure` may request (default 2); a higher `target_replicas` is refused with `422` |
 | `STORE_API_MODE` | `read_write` (default) or `read_only`; a reader rejects publication and pin-allocation changes |
+| `LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING` (default), `ERROR` or `CRITICAL`; use `DEBUG` for detailed diagnostics; applies to Store API and Uvicorn logs |
 
 Kubo and Cluster REST endpoints use round-robin selection. A
 timeout, refused connection, `429` or `5xx` places an endpoint in a 30-second
