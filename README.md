@@ -1,5 +1,8 @@
 # dark-store-api
 
+New platform developer: follow [developer onboarding](https://github.com/LA-Referencia-IOI/dark-deployer/blob/main/docs/developer-onboarding.md)
+for the complete local stack, signed requests and component iteration.
+
 Storage boundary for dARK. Minter and Resolver use Store API without knowing
 the global IPFS topology. Store API talks to a generated local failover pool;
 IPFS Cluster remains one global CRDT cluster, so Store APIs never call one
@@ -80,7 +83,7 @@ proxy route are not relied on to protect mutating operations.
 ## Development
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest -q
 ```

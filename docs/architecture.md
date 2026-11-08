@@ -1,7 +1,9 @@
 # Store API architecture
 
 Store API is the storage boundary of dARK: a stateless FastAPI service in front of
-a **site-local failover pool** of Kubo (IPFS) and IPFS Cluster REST endpoints.
+a **failover pool** of Kubo (IPFS) and IPFS Cluster REST endpoints. The writer
+connects to the inventory's declared storage peers; dedicated readers use
+site-local peers when sites are declared.
 Minter and Resolver never learn the IPFS topology. Cluster itself remains one
 global CRDT cluster, so Store APIs never call each other.
 
