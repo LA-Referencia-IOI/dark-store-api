@@ -10,7 +10,7 @@ another.
 | Method | Endpoint | Meaning |
 | --- | --- | --- |
 | `POST` | `/v1/store` | Add through Cluster REST and return the CID immediately |
-| `GET` | `/v1/retrieve/{cid}` | Read through either local Kubo |
+| `GET` | `/v1/retrieve/{cid}` | Read through the configured Kubo pool |
 | `GET` | `/v1/status/{cid}` | Observe global pin status |
 | `POST` | `/v1/status/batch` | Observe up to 200 CIDs; a timeout is returned per CID, not as a global failure |
 | `POST` | `/v1/replication/ensure` | Raise already stored pins to a higher replica target without re-uploading; one verdict per CID |
@@ -132,3 +132,13 @@ for the new pins to report `pinned`. A `target_replicas` above the configured
 backend failure returns `500`.
 
 It is intended for the minter's idle durability phase.
+
+## Documentation
+
+- [Architecture](docs/architecture.md): modules, endpoint document, write/read/status/promotion paths.
+- [Configuration](docs/configuration.md): environment variables, image and process.
+- [API reference](docs/api-reference.md): endpoints, status codes, health.
+- [Operations](docs/operations.md): run, test, deployment and troubleshooting.
+- Platform context: [documentation index](https://github.com/LA-Referencia-IOI/dark-deployer/blob/main/docs/README.md)
+  and [architecture](https://github.com/LA-Referencia-IOI/dark-deployer/blob/main/docs/architecture.md)
+  in the dark-deployer repository.
