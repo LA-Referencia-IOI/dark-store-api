@@ -144,6 +144,26 @@ class TestIPFSClusterBackend:
         assert add_call[2]["params"]["replication-min"] == 1
         assert add_call[2]["params"]["replication-max"] == 1
 
+    @pytest.mark.parametrize("allocation_status", [200, 404])
+    @pytest.mark.asyncio
+    async def test_global_store_only_creates_a_pin_when_absent(self, allocation_status):
+        _FakeAsyncClient.routes = {
+            ("POST", "http://cluster-a/add"): _FakeResponse(200, {"Hash": "bafy"}),
+            ("GET", "http://cluster-a/allocations/bafy"): _FakeResponse(allocation_status),
+            ("POST", "http://cluster-a/pins/bafy"): _FakeResponse(200, {"cid": "bafy"}),
+        }
+        store = backend(pin_everywhere=True)
+        assert (await store.store(b"data")).cid == "bafy"
+        assert await store.ensure_replication(["bafy"], 2) == {"bafy": "managed_by_cluster"}
+        add, lookup, *writes = _FakeAsyncClient.calls
+        assert add[2]["params"]["no-pin"] is True
+        assert lookup[:2] == ("GET", "http://cluster-a/allocations/bafy")
+        if allocation_status == 404:
+            assert len(writes) == 1
+            assert writes[0][2]["params"] == {"replication-min": -1, "replication-max": -1}
+        else:
+            assert writes == []
+
     @pytest.mark.asyncio
     async def test_ensure_replication_promotes_without_uploading(self):
         _FakeAsyncClient.routes = {

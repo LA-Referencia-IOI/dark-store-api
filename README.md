@@ -136,6 +136,16 @@ backend failure returns `500`.
 
 It is intended for the minter's idle durability phase.
 
+## Pin everywhere
+
+Set `REPLICATION_PIN_EVERYWHERE=true` together with the corresponding Minter
+setting. Store adds blocks locally using Cluster's `no-pin=true` and creates
+a global `-1/-1` pin when the CID has no catalog record. Repeated ingestion
+keeps the existing record. Cluster peers pin content as they receive the
+catalog. Store reports replica status, and its promotion endpoint returns
+`managed_by_cluster` for pending requests under this policy. Existing finite
+pins retain their factors. The setting defaults to false.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): modules, endpoint document, write/read/status/promotion paths.

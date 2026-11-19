@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     storage_endpoints_file: Path = Path("/config/storage-endpoints.json")
     ipfs_health_cache_ttl_seconds: float = 10.0
     replication_target_replicas: int = 2
+    replication_pin_everywhere: bool = False
     store_add_concurrency: int = 4
     store_status_concurrency: int = 6
     store_promotion_concurrency: int = 4

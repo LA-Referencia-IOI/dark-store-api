@@ -29,6 +29,7 @@ def get_storage_backend() -> StorageBackend:
             health_cache_ttl_seconds=settings.ipfs_health_cache_ttl_seconds,
             add_concurrency=settings.store_add_concurrency,
             status_concurrency=settings.store_status_concurrency,
+            pin_everywhere=settings.replication_pin_everywhere,
             promotion_concurrency=settings.store_promotion_concurrency,
         )
     else:
