@@ -67,6 +67,7 @@ class IPFSClusterBackend(StorageBackend):
         add_concurrency: int = 4,
         status_concurrency: int = 6,
         promotion_concurrency: int = 1,
+        pin_everywhere: bool = False,
     ):
         self.ipfs_api_urls = self._urls(
             ipfs_api_urls, "storage topology Kubo endpoints"
@@ -86,6 +87,7 @@ class IPFSClusterBackend(StorageBackend):
         )
         self._add_slots = asyncio.Semaphore(max(1, int(add_concurrency)))
         self._status_slots = asyncio.Semaphore(max(1, int(status_concurrency)))
+        self.pin_everywhere = pin_everywhere
         self.promotion_concurrency = max(1, int(promotion_concurrency))
         self._promotion_slots = asyncio.Semaphore(1)
 
@@ -132,10 +134,10 @@ class IPFSClusterBackend(StorageBackend):
                     f"{base_url}/add",
                     params={
                         "cid-version": 1,
-                        "pin": True,
+                        "no-pin": self.pin_everywhere,
                         "local": True,
-                        "replication-min": 1,
-                        "replication-max": 1,
+                        "replication-min": -1 if self.pin_everywhere else 1,
+                        "replication-max": -1 if self.pin_everywhere else 1,
                         "stream-channels": False,
                     },
                     files={"file": ("content", content, "application/octet-stream")},
@@ -146,6 +148,18 @@ class IPFSClusterBackend(StorageBackend):
                     continue
                 response.raise_for_status()
                 info = self._parse_ipfs_add_response(response, len(content))
+                if self.pin_everywhere:
+                    # Store the blocks locally first so ingesting an existing CID
+                    # leaves the authoritative pin record and its metadata alone.
+                    allocation = await client.get(f"{base_url}/allocations/{info.cid}")
+                    if allocation.status_code == 404:
+                        pin = await client.post(
+                            f"{base_url}/pins/{info.cid}",
+                            params={"replication-min": -1, "replication-max": -1},
+                        )
+                        pin.raise_for_status()
+                    else:
+                        allocation.raise_for_status()
                 await self._cluster_pool.succeeded(base_url)
                 break
             except httpx.RequestError as exc:
@@ -166,6 +180,8 @@ class IPFSClusterBackend(StorageBackend):
 
     async def ensure_replication(self, cids: list[str], target_replicas: int) -> dict[str, str]:
         """Increase existing pin allocations without re-uploading payloads."""
+        if self.pin_everywhere:
+            return dict.fromkeys(cids, "managed_by_cluster")
         async with self._promotion_slots:
             return await self._ensure_replication_with_slot(cids, target_replicas)
 
